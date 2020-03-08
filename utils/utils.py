@@ -15,7 +15,7 @@ import torchvision
 from tqdm import tqdm
 
 from . import torch_utils  # , google_utils
-
+MAX_DIST = 36.22
 matplotlib.rc('font', **{'size': 11})
 
 # Set printoptions
@@ -188,6 +188,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
     unique_classes = np.unique(target_cls)
 
     # Create Precision-Recall curve and compute AP for each class
+    pr_score = 0.5  # score to evaluate P and R https://github.com/ultralytics/yolov3/issues/898
     s = [len(unique_classes), tp.shape[1]]  # number class, number iou thresholds (i.e. 10 for mAP0.5...0.95)
     ap, p, r = np.zeros(s), np.zeros(s), np.zeros(s)
     for ci, c in enumerate(unique_classes):
@@ -204,18 +205,18 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
 
             # Recall
             recall = tpc / (n_gt + 1e-16)  # recall curve
-            r[ci] = recall[-1]
+            r[ci] = np.interp(-pr_score, -conf[i], recall[:, 0])  # r at pr_score, negative x, xp because xp decreases
 
             # Precision
             precision = tpc / (tpc + fpc)  # precision curve
-            p[ci] = precision[-1]
+            p[ci] = np.interp(-pr_score, -conf[i], precision[:, 0])  # p at pr_score
 
             # AP from recall-precision curve
             for j in range(tp.shape[1]):
                 ap[ci, j] = compute_ap(recall[:, j], precision[:, j])
 
             # Plot
-            # fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+            # fig, ax = plt.subplots(1, 1, figsize=(5, 5))
             # ax.plot(recall, precision)
             # ax.set_xlabel('Recall')
             # ax.set_ylabel('Precision')
@@ -365,8 +366,8 @@ class FocalLoss(nn.Module):
 
 def compute_loss(p, targets, model):  # predictions, targets, model
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]), ft([0]), ft([0])
-    tcls, tbox, indices, anchor_vec = build_targets(model, targets)
+    lcls, lbox, lobj, ldist = ft([0]), ft([0]), ft([0]), ft([0])
+    tcls, tbox, tdist, indices, anchor_vec = build_targets(model, targets)
     h = model.hyp  # hyperparameters
     arc = model.arc  # # (default, uCE, uBCE) detection architectures
     red = 'mean'  # Loss reduction (sum or mean)
@@ -376,6 +377,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]), reduction=red)
     BCE = nn.BCEWithLogitsLoss(reduction=red)
     CE = nn.CrossEntropyLoss(reduction=red)  # weight=model.class_weights
+    MSE = nn.MSELoss(reduction=red)
 
     if 'F' in arc:  # add focal loss
         g = h['fl_gamma']
@@ -404,16 +406,21 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             tobj[b, a, gj, gi] = (1.0 - h['gr']) + h['gr'] * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
 
             if 'default' in arc and model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.zeros_like(ps[:, 5:])  # targets
+                t = torch.zeros_like(ps[:, 5:-1])  # targets
                 t[range(nb), tcls[i]] = 1.0
-                lcls += BCEcls(ps[:, 5:], t)  # BCE
+                lcls += BCEcls(ps[:, 5:-1], t)  # BCE
                 # lcls += CE(ps[:, 5:], tcls[i])  # CE
 
                 # Instance-class weighting (use with reduction='none')
                 # nt = t.sum(0) + 1  # number of targets per class
                 # lcls += (BCEcls(ps[:, 5:], t) / nt).mean() * nt.mean()  # v1
                 # lcls += (BCEcls(ps[:, 5:], t) / nt[tcls[i]].view(-1,1)).mean() * nt.mean()  # v2
-
+                pred_dist = torch.sigmoid(ps[..., -1])
+                tdist_i = tdist[i]
+                dist_mask = (tdist_i > 0).view(-1)
+                if len(dist_mask) > 0: 
+                    ldist += torch.sqrt(MAX_DIST*MSE(pred_dist[dist_mask], tdist_i[dist_mask]))*0.2
+                    
             # Append targets to text file
             # with open('targets.txt', 'a') as file:
             #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
@@ -422,7 +429,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             lobj += BCEobj(pi[..., 4], tobj)  # obj loss
 
         elif 'BCE' in arc:  # unified BCE (80 classes)
-            t = torch.zeros_like(pi[..., 5:])  # targets
+            t = torch.zeros_like(pi[..., 5:-1])  # targets
             if nb:
                 t[b, a, gj, gi, tcls[i]] = 1.0
             lobj += BCE(pi[..., 5:], t)
@@ -431,7 +438,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             t = torch.zeros_like(pi[..., 0], dtype=torch.long)  # targets
             if nb:
                 t[b, a, gj, gi] = tcls[i] + 1
-            lcls += CE(pi[..., 4:].view(-1, model.nc + 1), t.view(-1))
+            lcls += CE(pi[..., 4:-1].view(-1, model.nc + 1), t.view(-1))
 
     lbox *= h['giou']
     lobj *= h['obj']
@@ -443,15 +450,15 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             lcls *= 3 / ng / model.nc
             lbox *= 3 / ng
 
-    loss = lbox + lobj + lcls
-    return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
+    loss = lbox + lobj + lcls + ldist
+    return loss, torch.cat((lbox, lobj, lcls, ldist, loss)).detach()
 
 
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
 
     nt = len(targets)
-    tcls, tbox, indices, av = [], [], [], []
+    tcls, tbox, tdist, indices, av = [], [], [], [], []
     multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
     reject, use_all_anchors = True, True
     for i in model.yolo_layers:
@@ -497,8 +504,8 @@ def build_targets(model, targets):
             assert c.max() < model.nc, 'Model accepts %g classes labeled from 0-%g, however you labelled a class %g. ' \
                                        'See https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data' % (
                                            model.nc, model.nc - 1, c.max())
-
-    return tcls, tbox, indices, av
+        tdist.append(t[:, 6])
+    return tcls, tbox, tdist, indices, av
 
 
 def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=True, classes=None, agnostic=False):
@@ -515,7 +522,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
 
     method = 'vision_batch'
     batched = 'batch' in method  # run once per image, all classes simultaneously
-    nc = prediction[0].shape[1] - 5  # number of classes
+    nc = prediction[0].shape[1] - 6  # number of classes
     multi_cls = multi_cls and (nc > 1)  # allow multiple classes per anchor
     output = [None] * len(prediction)
     for image_i, pred in enumerate(prediction):
@@ -526,18 +533,18 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
         pred = pred[((pred[:, 2:4] > min_wh) & (pred[:, 2:4] < max_wh)).all(1)]
 
         # Compute conf
-        pred[..., 5:] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
+        pred[..., 5:-1] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         box = xywh2xyxy(pred[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_cls:
-            i, j = (pred[:, 5:] > conf_thres).nonzero().t()
-            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1)), 1)
+            i, j = (pred[:, 5:-1] > conf_thres).nonzero().t()
+            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)*MAX_DIST), 1)
         else:  # best class only
-            conf, j = pred[:, 5:].max(1)
-            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1)), 1)
+            conf, j = pred[:, 5:-1].max(1)
+            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)*MAX_DIST), 1)
 
         # Filter by class
         if classes:

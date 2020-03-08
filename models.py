@@ -184,7 +184,7 @@ class YOLOLayer(nn.Module):
         self.anchors = torch.Tensor(anchors)
         self.na = len(anchors)  # number of anchors (3)
         self.nc = nc  # number of classes (80)
-        self.no = nc + 5  # number of outputs
+        self.no = nc + 6  # number of outputs
         self.nx = 0  # initialize number of x gridpoints
         self.ny = 0  # initialize number of y gridpoints
         self.arc = arc
@@ -234,10 +234,10 @@ class YOLOLayer(nn.Module):
             if 'default' in self.arc:  # seperate obj and cls
                 torch.sigmoid_(io[..., 4:])
             elif 'BCE' in self.arc:  # unified BCE (80 classes)
-                torch.sigmoid_(io[..., 5:])
+                torch.sigmoid_(io[..., 5:-1])
                 io[..., 4] = 1
             elif 'CE' in self.arc:  # unified CE (1 background + 80 classes)
-                io[..., 4:] = F.softmax(io[..., 4:], dim=4)
+                io[..., 4:] = F.softmax(io[..., 4:-1], dim=4)
                 io[..., 4] = 1
 
             if self.nc == 1:
