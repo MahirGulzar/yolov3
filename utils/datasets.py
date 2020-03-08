@@ -280,7 +280,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Define labels
         self.label_files = [x.replace(os.path.splitext(x)[-1], '.txt')
                             for x in self.img_files]
-                            
+
         # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
         if self.rect:
             # Read image shapes (wh)
@@ -333,7 +333,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
                 if l.shape[0]:
                     assert l.shape[1] == 6, '> 5 label columns: %s' % file
-                    assert (l >= 0).all(), 'negative labels: %s' % file
+                    assert (l[:,:-1] >= 0).all(), 'negative labels: %s' % file
                     assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
                     if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
                         nd += 1  # print('WARNING: duplicate rows in %s' % self.label_files[i])  # duplicate rows
