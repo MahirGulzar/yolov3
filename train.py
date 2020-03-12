@@ -22,13 +22,13 @@ results_file = 'results.txt'
 
 # Hyperparameters (results68: 59.9 mAP@0.5 yolov3-spp-416) https://github.com/ultralytics/yolov3/issues/310
 
-hyp = {'giou': 3.54,  # giou loss gain
+hyp = {'giou': 1,  # giou loss gain
        'cls': 37.4,  # cls loss gain
        'cls_pw': 1.0,  # cls BCELoss positive_weight
-       'obj': 64.3,  # obj loss gain (*=img_size/320 if img_size != 320)
+       'obj': 49.5,  # obj loss gain (*=img_size/320 if img_size != 320)
        'obj_pw': 1.0,  # obj BCELoss positive_weight
        'iou_t': 0.225,  # iou training threshold
-       'lr0': 0.01,  # initial learning rate (SGD=5E-3, Adam=5E-4)
+       'lr0': 5e-3,  # initial learning rate (SGD=5E-3, Adam=5E-4)
        'lrf': -4.,  # final LambdaLR learning rate = lr0 * (10 ** lrf)
        'momentum': 0.937,  # SGD momentum
        'weight_decay': 0.000484,  # optimizer weight decay
@@ -103,6 +103,7 @@ def train():
     start_epoch = 0
     best_fitness = 0.0
     attempt_download(weights)
+    print(weights)
     if weights.endswith('.pt'):  # pytorch format
         # possible weights are '*.pt', 'yolov3-spp.pt', 'yolov3-tiny.pt' etc.
         chkpt = torch.load(weights, map_location=device)

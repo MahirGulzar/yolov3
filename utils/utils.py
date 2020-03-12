@@ -396,7 +396,6 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             ng += nb
             ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
             # ps[:, 2:4] = torch.sigmoid(ps[:, 2:4])  # wh power loss (uncomment)
-
             # GIoU
             pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
             pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]
@@ -449,8 +448,11 @@ def compute_loss(p, targets, model):  # predictions, targets, model
         if ng:
             lcls *= 3 / ng / model.nc
             lbox *= 3 / ng
-
-    loss = lbox + lobj + lcls + ldist
+    loss = lbox + lobj + lcls
+    if not torch.isnan(ldist):
+        loss += ldist
+    else:
+        ldist = ft([0])
     return loss, torch.cat((lbox, lobj, lcls, ldist, loss)).detach()
 
 
@@ -541,10 +543,10 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_cls:
             i, j = (pred[:, 5:-1] > conf_thres).nonzero().t()
-            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)*MAX_DIST), 1)
+            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
         else:  # best class only
             conf, j = pred[:, 5:-1].max(1)
-            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)*MAX_DIST), 1)
+            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
 
         # Filter by class
         if classes:

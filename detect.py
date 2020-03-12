@@ -106,20 +106,20 @@ def detect(save_img=False):
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-
+                det[:, -1] *= MAX_DIST
                 # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
+                for c in det[:, -2].unique():
+                    n = (det[:, -2] == c).sum()  # detections per class
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
                 # Write results
-                for *xyxy, conf, cls in det:
+                for *xyxy, conf, cls, dist in det:
                     if save_txt:  # Write to file
                         with open(save_path + '.txt', 'a') as file:
                             file.write(('%g ' * 6 + '\n') % (*xyxy, cls, conf))
 
                     if save_img or view_img:  # Add bbox to image
-                        label = '%s %.2f' % (names[int(cls)], conf)
+                        label = '%s %.2f %.2f' % (names[int(cls)], conf, dist)
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
 
             # Print time (inference + NMS)
@@ -176,4 +176,4 @@ if __name__ == '__main__':
     print(opt)
 
     with torch.no_grad():
-        detect()
+        detect(True)
