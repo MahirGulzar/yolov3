@@ -26,10 +26,6 @@ np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format}) 
 cv2.setNumThreads(0)
 
 
-def floatn(x, n=3):  # format floats to n decimals
-    return float(format(x, '.%gf' % n))
-
-
 def init_seeds(seed=0):
     random.seed(seed)
     np.random.seed(seed)
@@ -107,22 +103,22 @@ def weights_init_normal(m):
 
 
 def xyxy2xywh(x):
-    # Convert bounding box format from [x1, y1, x2, y2] to [x, y, w, h]
+    # Transform box coordinates from [x1, y1, x2, y2] (where xy1=top-left, xy2=bottom-right) to [x, y, w, h] 
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
-    y[:, 0] = (x[:, 0] + x[:, 2]) / 2
-    y[:, 1] = (x[:, 1] + x[:, 3]) / 2
-    y[:, 2] = x[:, 2] - x[:, 0]
-    y[:, 3] = x[:, 3] - x[:, 1]
+    y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
+    y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
+    y[:, 2] = x[:, 2] - x[:, 0]  # width
+    y[:, 3] = x[:, 3] - x[:, 1]  # height
     return y
 
 
 def xywh2xyxy(x):
-    # Convert bounding box format from [x, y, w, h] to [x1, y1, x2, y2]
+    # Transform box coordinates from [x, y, w, h] to [x1, y1, x2, y2] (where xy1=top-left, xy2=bottom-right)
     y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
-    y[:, 0] = x[:, 0] - x[:, 2] / 2
-    y[:, 1] = x[:, 1] - x[:, 3] / 2
-    y[:, 2] = x[:, 0] + x[:, 2] / 2
-    y[:, 3] = x[:, 1] + x[:, 3] / 2
+    y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
+    y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
+    y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
+    y[:, 3] = x[:, 1] + x[:, 3] / 2  # bottom right y
     return y
 
 
@@ -164,8 +160,8 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
 
 def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
-    boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(min=0, max=img_shape[1])  # clip x
-    boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(min=0, max=img_shape[0])  # clip y
+    boxes[:, [0, 2]].clamp_(0, img_shape[1])  # clip x
+    boxes[:, [1, 3]].clamp_(0, img_shape[0])  # clip y
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls):
@@ -188,7 +184,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls):
     unique_classes = np.unique(target_cls)
 
     # Create Precision-Recall curve and compute AP for each class
-    pr_score = 0.5  # score to evaluate P and R https://github.com/ultralytics/yolov3/issues/898
+    pr_score = 0.1  # score to evaluate P and R https://github.com/ultralytics/yolov3/issues/898
     s = [len(unique_classes), tp.shape[1]]  # number class, number iou thresholds (i.e. 10 for mAP0.5...0.95)
     ap, p, r = np.zeros(s), np.zeros(s), np.zeros(s)
     for ci, c in enumerate(unique_classes):
@@ -268,7 +264,7 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False):
     if x1y1x2y2:  # x1, y1, x2, y2 = box1
         b1_x1, b1_y1, b1_x2, b1_y2 = box1[0], box1[1], box1[2], box1[3]
         b2_x1, b2_y1, b2_x2, b2_y2 = box2[0], box2[1], box2[2], box2[3]
-    else:  # x, y, w, h = box1
+    else:  # transform from xywh to xyxy
         b1_x1, b1_x2 = box1[0] - box1[2] / 2, box1[0] + box1[2] / 2
         b1_y1, b1_y2 = box1[1] - box1[3] / 2, box1[1] + box1[3] / 2
         b2_x1, b2_x2 = box2[0] - box2[2] / 2, box2[0] + box2[2] / 2
@@ -329,7 +325,7 @@ def box_iou(boxes1, boxes2):
     lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
     rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
 
-    inter = (rb - lt).clamp(min=0).prod(2)  # [N,M]
+    inter = (rb - lt).clamp(0).prod(2)  # [N,M]
     return inter / (area1[:, None] + area2 - inter)  # iou = inter / (area1 + area2 - inter)
 
 
@@ -342,19 +338,26 @@ def wh_iou(wh1, wh2):
 
 
 class FocalLoss(nn.Module):
-    # Wraps focal loss around existing loss_fcn() https://arxiv.org/pdf/1708.02002.pdf
-    # i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=2.5)
-    def __init__(self, loss_fcn, gamma=0.5, alpha=1):
+    # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
+    def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
         super(FocalLoss, self).__init__()
-        self.loss_fcn = loss_fcn
+        self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = loss_fcn.reduction
         self.loss_fcn.reduction = 'none'  # required to apply FL to each element
 
-    def forward(self, input, target):
-        loss = self.loss_fcn(input, target)
-        loss *= self.alpha * (1.000001 - torch.exp(-loss)) ** self.gamma  # non-zero power for gradient stability
+    def forward(self, pred, true):
+        loss = self.loss_fcn(pred, true)
+        # p_t = torch.exp(-loss)
+        # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
+
+        # TF implementation https://github.com/tensorflow/addons/blob/v0.7.1/tensorflow_addons/losses/focal_loss.py
+        pred_prob = torch.sigmoid(pred)  # prob from logits
+        p_t = true * pred_prob + (1 - true) * (1 - pred_prob)
+        alpha_factor = true * self.alpha + (1 - true) * (1 - self.alpha)
+        modulating_factor = (1.0 - p_t) ** self.gamma
+        loss *= alpha_factor * modulating_factor
 
         if self.reduction == 'mean':
             return loss.mean()
@@ -364,24 +367,29 @@ class FocalLoss(nn.Module):
             return loss
 
 
+def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
+    # return positive, negative label smoothing BCE targets
+    return 1.0 - 0.5 * eps, 0.5 * eps
+
+
 def compute_loss(p, targets, model):  # predictions, targets, model
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
     lcls, lbox, lobj, ldist = ft([0]), ft([0]), ft([0]), ft([0])
     tcls, tbox, tdist, indices, anchor_vec = build_targets(model, targets)
     h = model.hyp  # hyperparameters
-    arc = model.arc  # # (default, uCE, uBCE) detection architectures
     red = 'mean'  # Loss reduction (sum or mean)
 
     # Define criteria
     BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([h['cls_pw']]), reduction=red)
     BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]), reduction=red)
-    BCE = nn.BCEWithLogitsLoss(reduction=red)
-    CE = nn.CrossEntropyLoss(reduction=red)  # weight=model.class_weights
     MSE = nn.MSELoss(reduction=red)
+    # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
+    cp, cn = smooth_BCE(eps=0.0)
 
-    if 'F' in arc:  # add focal loss
-        g = h['fl_gamma']
-        BCEcls, BCEobj, BCE, CE = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g), FocalLoss(BCE, g), FocalLoss(CE, g)
+    # focal loss
+    g = h['fl_gamma']  # focal loss gamma
+    if g > 0:
+        BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
     # Compute losses
     np, ng = 0, 0  # number grid points, targets
@@ -403,42 +411,24 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             pbox = torch.cat((pxy, pwh), 1)  # predicted box
             giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
             lbox += (1.0 - giou).sum() if red == 'sum' else (1.0 - giou).mean()  # giou loss
-            tobj[b, a, gj, gi] = (1.0 - h['gr']) + h['gr'] * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
+            tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
 
-            if 'default' in arc and model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.zeros_like(ps[:, 5:-1])  # targets
-                t[range(nb), tcls[i]] = 1.0
+            if model.nc > 1:  # cls loss (only if multiple classes)
+                t = torch.full_like(ps[:, 5:-1], cn)  # targets
+                t[range(nb), tcls[i]] = cp
                 lcls += BCEcls(ps[:, 5:-1], t)  # BCE
                 # lcls += CE(ps[:, 5:], tcls[i])  # CE
-
-                # Instance-class weighting (use with reduction='none')
-                # nt = t.sum(0) + 1  # number of targets per class
-                # lcls += (BCEcls(ps[:, 5:], t) / nt).mean() * nt.mean()  # v1
-                # lcls += (BCEcls(ps[:, 5:], t) / nt[tcls[i]].view(-1,1)).mean() * nt.mean()  # v2
                 pred_dist = torch.sigmoid(ps[..., -1])
                 tdist_i = tdist[i]
                 dist_mask = (tdist_i > 0).view(-1)
                 if len(dist_mask) > 0: 
                     ldist += torch.sqrt(MAX_DIST*MSE(pred_dist[dist_mask], tdist_i[dist_mask]))*0.2
-                    
+
             # Append targets to text file
             # with open('targets.txt', 'a') as file:
             #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
 
-        if 'default' in arc:  # separate obj and cls
-            lobj += BCEobj(pi[..., 4], tobj)  # obj loss
-
-        elif 'BCE' in arc:  # unified BCE (80 classes)
-            t = torch.zeros_like(pi[..., 5:-1])  # targets
-            if nb:
-                t[b, a, gj, gi, tcls[i]] = 1.0
-            lobj += BCE(pi[..., 5:], t)
-
-        elif 'CE' in arc:  # unified CE (1 background + 80 classes)
-            t = torch.zeros_like(pi[..., 0], dtype=torch.long)  # targets
-            if nb:
-                t[b, a, gj, gi] = tcls[i] + 1
-            lcls += CE(pi[..., 4:-1].view(-1, model.nc + 1), t.view(-1))
+        lobj += BCEobj(pi[..., 4], tobj)  # obj loss
 
     lbox *= h['giou']
     lobj *= h['obj']
@@ -508,7 +498,7 @@ def build_targets(model, targets):
     return tcls, tbox, tdist, indices, av
 
 
-def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=True, classes=None, agnostic=False):
+def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=True, classes=None, agnostic=False):
     """
     Removes detections with lower object confidence score than 'conf_thres'
     Non-Maximum Suppression to further filter detections.
@@ -523,7 +513,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
     method = 'vision_batch'
     batched = 'batch' in method  # run once per image, all classes simultaneously
     nc = prediction[0].shape[1] - 6  # number of classes
-    multi_cls = multi_cls and (nc > 1)  # allow multiple classes per anchor
+    multi_label &= nc > 1  # multiple labels per box
     output = [None] * len(prediction)
     for image_i, pred in enumerate(prediction):
         # Apply conf constraint
@@ -532,6 +522,10 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
         # Apply width-height constraint
         pred = pred[((pred[:, 2:4] > min_wh) & (pred[:, 2:4] < max_wh)).all(1)]
 
+        # If none remain process next image
+        if not pred.shape[0]:
+            continue
+
         # Compute conf
         pred[..., 5:-1] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
 
@@ -539,7 +533,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
         box = xywh2xyxy(pred[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
-        if multi_cls:
+        if multi_label:
             i, j = (pred[:, 5:-1] > conf_thres).nonzero().t()
             pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)*MAX_DIST), 1)
         else:  # best class only
@@ -566,10 +560,10 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_cls=Tru
         if batched:
             c = pred[:, 5] * 0 if agnostic else pred[:, 5]  # class-agnostic NMS
             boxes, scores = pred[:, :4].clone(), pred[:, 4]
+            boxes += c.view(-1, 1) * max_wh
             if method == 'vision_batch':
-                i = torchvision.ops.boxes.batched_nms(boxes, scores, c, iou_thres)
+                i = torchvision.ops.boxes.nms(boxes, scores, iou_thres)
             elif method == 'fast_batch':  # FastNMS from https://github.com/dbolya/yolact
-                boxes += c.view(-1, 1) * max_wh
                 iou = box_iou(boxes, boxes).triu_(diagonal=1)  # upper triangular iou matrix
                 i = iou.max(dim=0)[0] < iou_thres
 
@@ -655,23 +649,24 @@ def print_model_biases(model):
     print('\nModel Bias Summary: %8s%18s%18s%18s' % ('layer', 'regression', 'objectness', 'classification'))
     multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
     for l in model.yolo_layers:  # print pretrained biases
-        if multi_gpu:
-            na = model.module.module_list[l].na  # number of anchors
-            b = model.module.module_list[l - 1][0].bias.view(na, -1)  # bias 3x85
-        else:
-            na = model.module_list[l].na
-            b = model.module_list[l - 1][0].bias.view(na, -1)  # bias 3x85
-        print(' ' * 20 + '%8g %18s%18s%18s' % (l, '%5.2f+/-%-5.2f' % (b[:, :4].mean(), b[:, :4].std()),
-                                               '%5.2f+/-%-5.2f' % (b[:, 4].mean(), b[:, 4].std()),
-                                               '%5.2f+/-%-5.2f' % (b[:, 5:].mean(), b[:, 5:].std())))
+        try:
+            if multi_gpu:
+                na = model.module.module_list[l].na  # number of anchors
+                b = model.module.module_list[l - 1][0].bias.view(na, -1)  # bias 3x85
+            else:
+                na = model.module_list[l].na
+                b = model.module_list[l - 1][0].bias.view(na, -1)  # bias 3x85
+            print(' ' * 20 + '%8g %18s%18s%18s' % (l, '%5.2f+/-%-5.2f' % (b[:, :4].mean(), b[:, :4].std()),
+                                                   '%5.2f+/-%-5.2f' % (b[:, 4].mean(), b[:, 4].std()),
+                                                   '%5.2f+/-%-5.2f' % (b[:, 5:].mean(), b[:, 5:].std())))
+        except:
+            pass
 
 
 def strip_optimizer(f='weights/last.pt'):  # from utils.utils import *; strip_optimizer()
     # Strip optimizer from *.pt files for lighter files (reduced by 2/3 size)
     x = torch.load(f, map_location=torch.device('cpu'))
     x['optimizer'] = None
-    # x['training_results'] = None  # uncomment to create a backbone
-    # x['epoch'] = -1  # uncomment to create a backbone
     torch.save(x, f)
 
 
@@ -1038,7 +1033,7 @@ def plot_results_overlay(start=0, stop=0):  # from utils.utils import *; plot_re
 
 
 def plot_results(start=0, stop=0, bucket='', id=()):  # from utils.utils import *; plot_results()
-    # Plot training results files 'results*.txt'
+    # Plot training 'results*.txt' as seen in https://github.com/ultralytics/yolov3#training
     fig, ax = plt.subplots(2, 5, figsize=(12, 6))
     ax = ax.ravel()
     s = ['GIoU', 'Objectness', 'Classification', 'Precision', 'Recall',

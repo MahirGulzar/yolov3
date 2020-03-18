@@ -17,7 +17,6 @@ def test(cfg,
          iou_thres=0.6,  # for nms
          save_json=False,
          single_cls=False,
-         profile=False,
          model=None,
          dataloader=None):
     # Initialize/load model and set device
@@ -39,7 +38,7 @@ def test(cfg,
         else:  # darknet format
             load_darknet_weights(model, weights)
 
-        if torch.cuda.device_count() > 1:
+        if device.type != 'cpu' and torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
     else:  # called by train.py
         device = next(model.parameters()).device  # get model device
@@ -75,7 +74,7 @@ def test(cfg,
     for batch_i, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
-        _, _, height, width = imgs.shape  # batch size, channels, height, width
+        nb, _, height, width = imgs.shape  # batch size, channels, height, width
         whwh = torch.Tensor([width, height, width, height]).to(device)
 
         # Plot images with bounding boxes
@@ -85,10 +84,23 @@ def test(cfg,
 
         # Disable gradients
         with torch.no_grad():
+            aug = False  # augment https://github.com/ultralytics/yolov3/issues/931
+            if aug:
+                imgs = torch.cat((imgs,
+                                  imgs.flip(3),  # flip-lr
+                                  torch_utils.scale_img(imgs, 0.7),  # scale
+                                  ), 0)
+
             # Run model
             t = torch_utils.time_synchronized()
             inf_out, train_out = model(imgs)  # inference and training outputs
             t0 += torch_utils.time_synchronized() - t
+
+            if aug:
+                x = torch.split(inf_out, nb, dim=0)
+                x[1][..., 0] = width - x[1][..., 0]  # flip lr
+                x[2][..., :4] /= 0.7  # scale
+                inf_out = torch.cat(x, 1)
 
             # Compute loss
             if hasattr(model, 'hyp'):  # if model has loss hyperparameters
@@ -126,11 +138,11 @@ def test(cfg,
                 scale_coords(imgs[si].shape[1:], box, shapes[si][0], shapes[si][1])  # to original shape
                 box = xyxy2xywh(box)  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                for di, d in enumerate(pred):
+                for p, b in zip(pred.tolist(), box.tolist()):
                     jdict.append({'image_id': image_id,
-                                  'category_id': coco91class[int(d[5])],
-                                  'bbox': [floatn(x, 3) for x in box[di]],
-                                  'score': floatn(d[4], 5)})
+                                  'category_id': coco91class[int(p[5])],
+                                  'bbox': [round(x, 3) for x in b],
+                                  'score': round(p[4], 5)})
 
             # Assign all predictions as incorrect
             correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
@@ -189,13 +201,14 @@ def test(cfg,
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
 
-    # Print profile results
-    if profile:
-        t = tuple(x / seen * 1E3 for x in (t0, t1, t0 + t1))
-        print('Profile results: %.1f/%.1f/%.1f ms inference/NMS/total per image' % t)
+    # Print speeds
+    if verbose:
+        t = tuple(x / seen * 1E3 for x in (t0, t1, t0 + t1)) + (img_size, img_size, batch_size)  # tuple
+        print('Speed: %.1f/%.1f/%.1f ms inference/NMS/total per %gx%g image at batch-size %g' % t)
 
     # Save JSON
     if save_json and map and len(jdict):
+        print('\nCOCO mAP with pycocotools...')
         imgIds = [int(Path(x).stem.split('_')[-1]) for x in dataloader.dataset.img_files]
         with open('results.json', 'w') as file:
             json.dump(jdict, file)
@@ -237,7 +250,6 @@ if __name__ == '__main__':
     parser.add_argument('--task', default='test', help="'test', 'study', 'benchmark'")
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
-    parser.add_argument('--profile', action='store_true', help='profile inference and NMS times')
     opt = parser.parse_args()
     opt.save_json = opt.save_json or any([x in opt.data for x in ['coco.data', 'coco2014.data', 'coco2017.data']])
     print(opt)
@@ -252,8 +264,7 @@ if __name__ == '__main__':
              opt.conf_thres,
              opt.iou_thres,
              opt.save_json,
-             opt.single_cls,
-             opt.profile)
+             opt.single_cls)
 
     elif opt.task == 'benchmark':  # mAPs at 320-608 at conf 0.5 and 0.7
         y = []
