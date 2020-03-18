@@ -199,7 +199,7 @@ def test(cfg,
     # Print results per class
     if verbose and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
-            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
+            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i],RMSE))
 
     # Print speeds
     if verbose:
