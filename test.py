@@ -167,7 +167,10 @@ def test(cfg,
                         for j in (ious > iouv[0]).nonzero():
                             d = ti[i[j]]  # detected target
                             pred_for_d = pred[i[j]]
-                            dist_for_d = tdist[i[j]]
+                            if i[j] < len(tdist):
+                                dist_for_d = tdist[i[j]]
+                            else:
+                                dist_for_d = -1
                             if d not in detected:
                                 detected.append(d)
                                 if dist_for_d > 0:

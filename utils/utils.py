@@ -462,7 +462,7 @@ def build_targets(model, targets):
 
         # iou of targets-anchors
         t, a = targets, []
-        gwh = t[:, 4:6] * ng
+        gwh = t[:, 4:-1] * ng
         if nt:
             iou = wh_iou(anchor_vec, gwh)
 
@@ -496,7 +496,7 @@ def build_targets(model, targets):
             assert c.max() < model.nc, 'Model accepts %g classes labeled from 0-%g, however you labelled a class %g. ' \
                                        'See https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data' % (
                                            model.nc, model.nc - 1, c.max())
-        tdist.append(t[:, 6])
+        tdist.append(t[:, -1])
     return tcls, tbox, tdist, indices, av
 
 
