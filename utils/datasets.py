@@ -280,7 +280,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
 
         # Define labels
-        self.label_files = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt')
+        self.label_files = [x.replace(os.path.splitext(x)[-1], '.txt')
                             for x in self.img_files]
 
         # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
@@ -320,7 +320,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.imgs = [None] * n
         self.labels = [None] * n
         if cache_labels or image_weights:  # cache labels for faster training
-            self.labels = [np.zeros((0, 5))] * n
+            self.labels = [np.zeros((0, 6))] * n
             extract_bounding_boxes = False
             create_datasubset = False
             pbar = tqdm(self.label_files, desc='Caching labels')
@@ -334,8 +334,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     continue
 
                 if l.shape[0]:
-                    assert l.shape[1] == 5, '> 5 label columns: %s' % file
-                    assert (l >= 0).all(), 'negative labels: %s' % file
+                    assert l.shape[1] == 6, '> 5 label columns: %s' % file
+                    assert (l[:,:-1] >= 0).all(), 'negative labels: %s' % file
                     assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
                     if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
                         nd += 1  # print('WARNING: duplicate rows in %s' % self.label_files[i])  # duplicate rows
@@ -456,6 +456,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 2] = ratio[1] * h * (x[:, 2] - x[:, 4] / 2) + pad[1]  # pad height
                     labels[:, 3] = ratio[0] * w * (x[:, 1] + x[:, 3] / 2) + pad[0]
                     labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + pad[1]
+                    labels[:, 5] = x[:, 5]
 
         if self.augment:
             # Augment imagespace
@@ -511,7 +512,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nL:
                     labels[:, 2] = 1 - labels[:, 2]
 
-        labels_out = torch.zeros((nL, 6))
+        labels_out = torch.zeros((nL, 7))
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
 

@@ -15,7 +15,7 @@ import torchvision
 from tqdm import tqdm
 
 from . import torch_utils  # , google_utils
-
+MAX_DIST = 36.22
 matplotlib.rc('font', **{'size': 11})
 
 # Set printoptions
@@ -376,15 +376,15 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
     if target_seg is not None and target_depth is not None:
         p, pred_seg, pred_depth = p
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]), ft([0]), ft([0])
-    tcls, tbox, indices, anchor_vec = build_targets(model, targets)
+    lcls, lbox, lobj, ldist = ft([0]), ft([0]), ft([0]), ft([0])
+    tcls, tbox, tdist, indices, anchor_vec = build_targets(model, targets)
     h = model.hyp  # hyperparameters
     red = 'mean'  # Loss reduction (sum or mean)
 
     # Define criteria
     BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([h['cls_pw']]), reduction=red)
     BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([h['obj_pw']]), reduction=red)
-
+    MSE = nn.MSELoss(reduction=red)
     # class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = smooth_BCE(eps=0.0)
 
@@ -406,7 +406,6 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
             ng += nb
             ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
             # ps[:, 2:4] = torch.sigmoid(ps[:, 2:4])  # wh power loss (uncomment)
-
             # GIoU
             pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
             pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]
@@ -416,10 +415,15 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
             tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
 
             if model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.full_like(ps[:, 5:], cn)  # targets
+                t = torch.full_like(ps[:, 5:-1], cn)  # targets
                 t[range(nb), tcls[i]] = cp
-                lcls += BCEcls(ps[:, 5:], t)  # BCE
+                lcls += BCEcls(ps[:, 5:-1], t)  # BCE
                 # lcls += CE(ps[:, 5:], tcls[i])  # CE
+                pred_dist = torch.sigmoid(ps[..., -1])
+                tdist_i = tdist[i]
+                dist_mask = (tdist_i > 0).view(-1)
+                if len(dist_mask) > 0: 
+                    ldist += torch.sqrt(MAX_DIST*MSE(pred_dist[dist_mask], tdist_i[dist_mask]))*0.2
 
             # Append targets to text file
             # with open('targets.txt', 'a') as file:
@@ -436,20 +440,23 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
         if ng:
             lcls *= 3 / ng / model.nc
             lbox *= 3 / ng
-
     loss = lbox + lobj + lcls
     if target_depth is not None:
         loss += torch.nn.functional.l1_loss(torch.nn.functional.interpolate(pred_depth, target_depth.shape[-2:], mode='bilinear', align_corners=False), target_depth)
     if target_seg is not None:
         loss += torch.nn.functional.cross_entropy(torch.nn.functional.interpolate(pred_seg, target_seg.shape[-2:], mode='bilinear', align_corners=False), target_seg)
-    return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
+    if not torch.isnan(ldist):
+        loss += ldist
+    else:
+        ldist = ft([0])
+    return loss, torch.cat((lbox, lobj, lcls, ldist, loss)).detach()
 
 
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
 
     nt = len(targets)
-    tcls, tbox, indices, av = [], [], [], []
+    tcls, tbox, tdist, indices, av = [], [], [], [], []
     multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
     reject, use_all_anchors = True, True
     for i in model.yolo_layers:
@@ -461,7 +468,7 @@ def build_targets(model, targets):
 
         # iou of targets-anchors
         t, a = targets, []
-        gwh = t[:, 4:6] * ng
+        gwh = t[:, 4:-1] * ng
         if nt:
             iou = wh_iou(anchor_vec, gwh)
 
@@ -495,8 +502,8 @@ def build_targets(model, targets):
             assert c.max() < model.nc, 'Model accepts %g classes labeled from 0-%g, however you labelled a class %g. ' \
                                        'See https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data' % (
                                            model.nc, model.nc - 1, c.max())
-
-    return tcls, tbox, indices, av
+        tdist.append(t[:, -1])
+    return tcls, tbox, tdist, indices, av
 
 
 def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=True, classes=None, agnostic=False):
@@ -513,7 +520,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
 
     method = 'vision_batch'
     batched = 'batch' in method  # run once per image, all classes simultaneously
-    nc = prediction[0].shape[1] - 5  # number of classes
+    nc = prediction[0].shape[1] - 6  # number of classes
     multi_label &= nc > 1  # multiple labels per box
     output = [None] * len(prediction)
     for image_i, pred in enumerate(prediction):
@@ -528,18 +535,18 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
             continue
 
         # Compute conf
-        pred[..., 5:] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
+        pred[..., 5:-1] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         box = xywh2xyxy(pred[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_label:
-            i, j = (pred[:, 5:] > conf_thres).nonzero().t()
-            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1)), 1)
+            i, j = (pred[:, 5:-1] > conf_thres).nonzero().t()
+            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
         else:  # best class only
-            conf, j = pred[:, 5:].max(1)
-            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1)), 1)
+            conf, j = pred[:, 5:-1].max(1)
+            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
 
         # Filter by class
         if classes:

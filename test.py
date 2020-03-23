@@ -66,10 +66,11 @@ def test(cfg,
     seen = 0
     model.eval()
     coco91class = coco80_to_coco91_class()
-    s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1')
-    p, r, f1, mp, mr, map, mf1, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
-    loss = torch.zeros(3, device=device)
+    s = ('%20s' + '%10s' * 7) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1', 'RMSE')
+    p, r, f1, mp, mr, map, mf1, t0, t1, RMSE = 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    loss = torch.zeros(4, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
+    dist_count = 0
     for batch_i, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
@@ -103,7 +104,7 @@ def test(cfg,
 
             # Compute loss
             if hasattr(model, 'hyp'):  # if model has loss hyperparameters
-                loss += compute_loss(train_out, targets, model)[1][:3]  # GIoU, obj, cls
+                loss += compute_loss(train_out, targets, model)[1][:-1]  # GIoU, obj, cls
 
             # Run NMS
             t = torch_utils.time_synchronized()
@@ -151,29 +152,37 @@ def test(cfg,
 
                 # target boxes
                 tbox = xywh2xyxy(labels[:, 1:5]) * whwh
+                tdist = labels[:,-1]
 
                 # Per target class
                 for cls in torch.unique(tcls_tensor):
                     ti = (cls == tcls_tensor).nonzero().view(-1)  # prediction indices
                     pi = (cls == pred[:, 5]).nonzero().view(-1)  # target indices
-
                     # Search for detections
                     if pi.shape[0]:
                         # Prediction to target ious
                         ious, i = box_iou(pred[pi, :4], tbox[ti]).max(1)  # best ious, indices
-
+                        #print(i.shape,ti.shape,pi.shape, tdist.shape, tbox.shape)
                         # Append detections
                         for j in (ious > iouv[0]).nonzero():
                             d = ti[i[j]]  # detected target
+                            pred_for_d = pred[i[j]]
+                            if i[j] < len(tdist):
+                                dist_for_d = tdist[i[j]]
+                            else:
+                                dist_for_d = -1
                             if d not in detected:
                                 detected.append(d)
+                                if dist_for_d > 0:
+                                    dist_count += 1
+                                    RMSE += (pred_for_d.squeeze()[-1]-dist_for_d)**2
                                 correct[pi[j]] = ious[j] > iouv  # iou_thres is 1xn
                                 if len(detected) == nl:  # all targets already located in image
                                     break
-
             # Append statistics (correct, conf, pcls, tcls)
             stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
-
+    if dist_count > 0:
+        RMSE = torch.sqrt(MAX_DIST*RMSE/dist_count)
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
     if len(stats):
@@ -182,17 +191,18 @@ def test(cfg,
             p, r, ap, f1 = p[:, 0], r[:, 0], ap.mean(1), ap[:, 0]  # [P, R, AP@0.5:0.95, AP@0.5]
         mp, mr, map, mf1 = p.mean(), r.mean(), ap.mean(), f1.mean()
         nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
+
     else:
         nt = torch.zeros(1)
 
     # Print results
-    pf = '%20s' + '%10.3g' * 6  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map, mf1))
+    pf = '%20s' + '%10.3g' * 7  # print format
+    print(pf % ('all', seen, nt.sum(), mp, mr, map, mf1, RMSE))
 
     # Print results per class
     if verbose and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
-            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
+            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i],RMSE))
 
     # Print speeds
     if verbose:
@@ -227,7 +237,7 @@ def test(cfg,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    return (mp, mr, map, mf1, *(loss.cpu() / len(dataloader)).tolist()), maps
+    return (mp, mr, map, mf1, *(loss.cpu() / len(dataloader)).tolist(),RMSE), maps
 
 
 if __name__ == '__main__':
