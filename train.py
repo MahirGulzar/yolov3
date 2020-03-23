@@ -167,7 +167,8 @@ def train():
                                   hyp=hyp,  # augmentation hyperparameters
                                   rect=opt.rect,  # rectangular training
                                   cache_images=opt.cache_images,
-                                  single_cls=opt.single_cls)
+                                  single_cls=opt.single_cls,
+                                  use_seg_depth=opt.use_seg_depth)
 
     # Dataloader
     batch_size = min(batch_size, len(dataset))
@@ -235,7 +236,15 @@ def train():
         mloss = torch.zeros(4).to(device)  # mean losses
         print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
         pbar = tqdm(enumerate(dataloader), total=nb)  # progress bar
-        for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+        for i, _batch in pbar:  # batch -------------------------------------------------------------
+            if opt.use_seg_depth:
+                imgs, targets, paths, _, segs, depths = _batch
+                segs = segs.to(device).long()
+                depths = (depths.to(device).float() -128) / 128
+            else:
+                imgs, targets, paths, _ = _batch
+                segs = None 
+                depths = None 
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
             targets = targets.to(device)
@@ -267,12 +276,16 @@ def train():
                 if sf != 1:
                     ns = [math.ceil(x * sf / 32.) * 32 for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
+                    if opt.use_depth_seg:
+                        segs = F.interpolate(segs, size=ns, mode='nearest')
+                        depths = F.interpolate(depths, size=ns, mode='bilinear', align_corners=False)
+
 
             # Run model
             pred = model(imgs)
 
             # Compute loss
-            loss, loss_items = compute_loss(pred, targets, model)
+            loss, loss_items = compute_loss(pred, targets, model, target_seg=segs, target_depth=depths)
             if not torch.isfinite(loss):
                 print('WARNING: non-finite loss, ending training ', loss_items)
                 return results
@@ -410,6 +423,7 @@ if __name__ == '__main__':
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--var', type=float, help='debug variable')
+    parser.add_argument('--use_seg_depth', action="store_true", help='Train with segmentation and depth targets as well')
     opt = parser.parse_args()
     opt.weights = last if opt.resume else opt.weights
     print(opt)
