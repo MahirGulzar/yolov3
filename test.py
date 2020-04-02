@@ -18,7 +18,8 @@ def test(cfg,
          save_json=False,
          single_cls=False,
          model=None,
-         dataloader=None):
+         dataloader=None,
+         use_seg_depth=False):
     # Initialize/load model and set device
     if model is None:
         device = torch_utils.select_device(opt.device, batch_size=batch_size)
@@ -29,7 +30,7 @@ def test(cfg,
             os.remove(f)
 
         # Initialize model
-        model = Darknet(cfg, img_size).to(device)
+        model = Darknet(cfg, img_size, seg_depth=use_seg_depth).to(device)
 
         # Load weights
         attempt_download(weights)
@@ -55,7 +56,7 @@ def test(cfg,
 
     # Dataloader
     if dataloader is None:
-        dataset = LoadImagesAndLabels(path, img_size, batch_size, rect=True, single_cls=opt.single_cls)
+        dataset = LoadImagesAndLabels(path, img_size, batch_size, rect=True, single_cls=opt.single_cls, use_seg_depth=use_seg_depth)
         batch_size = min(batch_size, len(dataset))
         dataloader = DataLoader(dataset,
                                 batch_size=batch_size,
@@ -71,7 +72,12 @@ def test(cfg,
     loss = torch.zeros(4, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
     dist_count = 0
-    for batch_i, (imgs, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+    for batch_i, _batch in enumerate(tqdm(dataloader, desc=s)):
+        if use_seg_depth:
+            (imgs, targets, paths, shapes, segs, depths) = _batch
+        else:
+            (imgs, targets, paths, shapes) = _batch
+
         imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = imgs.shape  # batch size, channels, height, width
@@ -93,7 +99,10 @@ def test(cfg,
 
             # Run model
             t = torch_utils.time_synchronized()
-            inf_out, train_out = model(imgs)  # inference and training outputs
+            if use_seg_depth:
+                inf_out, train_out, seg, depth = model(imgs)  # inference and training outputs
+            else:
+                inf_out, train_out = model(imgs)  # inference and training outputs
             t0 += torch_utils.time_synchronized() - t
 
             if aug:
@@ -253,6 +262,7 @@ if __name__ == '__main__':
     parser.add_argument('--task', default='test', help="'test', 'study', 'benchmark'")
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
+    parser.add_argument('--use_seg_depth', action='store_true', help='Loads segmentation and depth heads as well')
     opt = parser.parse_args()
     opt.save_json = opt.save_json or any([x in opt.data for x in ['coco.data', 'coco2014.data', 'coco2017.data']])
     print(opt)
@@ -267,7 +277,8 @@ if __name__ == '__main__':
              opt.conf_thres,
              opt.iou_thres,
              opt.save_json,
-             opt.single_cls)
+             opt.single_cls,
+             use_seg_depth=opt.use_seg_depth)
 
     elif opt.task == 'benchmark':  # mAPs at 320-608 at conf 0.5 and 0.7
         y = []

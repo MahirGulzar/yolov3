@@ -42,11 +42,14 @@ def exif_size(img):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, img_size=416):
+    def __init__(self, path, img_size=416, ignore_seg_depth=False):
         path = str(Path(path))  # os-agnostic
         files = []
         if os.path.isdir(path):
             files = sorted(glob.glob(os.path.join(path, '*.*')))
+            if ignore_seg_depth:
+                files = [_file for _file in files if "seg" not in _file and "depth" not in _file]
+
         elif os.path.isfile(path):
             files = [path]
 
@@ -420,6 +423,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         hyp = self.hyp
         if self.mosaic:
+            print("mosaic")
             # Load mosaic
             img, labels = load_mosaic(self, index)
             shapes = None
@@ -431,9 +435,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 img_path = self.img_files[index]
                 seg_path = img_path[:-4] + "_seg.png"
                 depth_path = img_path[:-4] + "_depth.png"
-                seg = cv2.imread(seg_path)  # segmentation is in grayscale
+                seg = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)  # segmentation is in grayscale
                 seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST) 
-                depth = cv2.imread(depth_path)  # depth is in grayscale
+                depth = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)  # depth is in grayscale
                 depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST) 
 
             # Letterbox
@@ -519,8 +523,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
+        seg = np.ascontiguousarray(seg)
+        depth = np.ascontiguousarray(depth)
         if self.use_seg_depth:
-            return torch.from_numpy(img), labels_out, img_path, shapes, torch.from_numpy(seg), torch.from_numpy(depth)
+            return torch.from_numpy(img), labels_out, img_path, shapes, torch.from_numpy(seg).unsqueeze(0), torch.from_numpy(depth).unsqueeze(0)
         return torch.from_numpy(img), labels_out, img_path, shapes
 
 #    @staticmethod

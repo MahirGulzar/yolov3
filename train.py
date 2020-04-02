@@ -77,7 +77,7 @@ def train():
         os.remove(f)
 
     # Initialize model
-    model = Darknet(cfg).to(device)
+    model = Darknet(cfg, seg_depth=opt.use_seg_depth).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -117,7 +117,8 @@ def train():
             raise KeyError(s) from e
 
         # load optimizer
-        if chkpt['optimizer'] is not None:
+        if chkpt['optimizer'] is not None and not opt.use_seg_depth:
+            print("loading optimizer")
             optimizer.load_state_dict(chkpt['optimizer'])
             best_fitness = chkpt['best_fitness']
 
@@ -126,7 +127,8 @@ def train():
             with open(results_file, 'w') as file:
                 file.write(chkpt['training_results'])  # write results.txt
 
-        start_epoch = chkpt['epoch'] + 1
+        if not opt.use_seg_depth: 
+            start_epoch = chkpt['epoch'] + 1
         del chkpt
 
     elif len(weights) > 0:  # darknet format
@@ -277,8 +279,8 @@ def train():
                 if sf != 1:
                     ns = [math.ceil(x * sf / 32.) * 32 for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
-                    if opt.use_depth_seg:
-                        segs = F.interpolate(segs, size=ns, mode='nearest')
+                    if opt.use_seg_depth:
+                        segs = F.interpolate(segs.float(), size=ns, mode='nearest').long()
                         depths = F.interpolate(depths, size=ns, mode='bilinear', align_corners=False)
 
 
@@ -334,9 +336,9 @@ def train():
                                       single_cls=opt.single_cls,
                                       dataloader=testloader)
 
-        # Write epoch results
-        with open(results_file, 'a') as f:
-            f.write(s + '%10.3g' * 9 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
+            # Write epoch results
+            with open(results_file, 'a') as f:
+                f.write(s + '%10.3g' * 9 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
         if len(opt.name) and opt.bucket:
             os.system('gsutil cp results.txt gs://%s/results/results%s.txt' % (opt.bucket, opt.name))
 

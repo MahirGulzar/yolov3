@@ -263,17 +263,26 @@ class Darknet(nn.Module):
         self.info()  # print model description
         self.seg_depth = seg_depth 
         if seg_depth:
-            self.seg_head = torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(24 * 3, 64, kernel_size=3),
+            self.shared_head = torch.nn.Sequential(
+                torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+                torch.nn.Conv2d(24 * 3, 64, kernel_size=3),
                 torch.nn.ReLU(),
                 torch.nn.BatchNorm2d(64),
-                torch.nn.ConvTranspose2d(64, seg_classes, kernel_size=3)
+                torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            )
+            self.seg_head = torch.nn.Sequential(
+                torch.nn.Conv2d(64 + 3, 32, kernel_size=3),
+                torch.nn.ReLU(),
+                torch.nn.BatchNorm2d(32),
+                torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+                torch.nn.Conv2d(32, seg_classes, kernel_size=3),
             )
             self.depth_head = torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(24 * 3, 64, kernel_size=3),
+                torch.nn.Conv2d(64 + 3, 32, kernel_size=3),
                 torch.nn.ReLU(),
-                torch.nn.BatchNorm2d(64),
-                torch.nn.ConvTranspose2d(64, 1, kernel_size=3),
+                torch.nn.BatchNorm2d(32),
+                torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+                torch.nn.Conv2d(32, 1, kernel_size=3),
                 torch.nn.Tanh(),
             )
 
@@ -284,6 +293,7 @@ class Darknet(nn.Module):
             str = ''
             print('0', x.shape)
         if self.seg_depth:
+            _input = x
             feats = []
         for i, (mdef, module) in enumerate(zip(self.module_defs, self.module_list)):
             mtype = mdef['type']
@@ -318,9 +328,13 @@ class Darknet(nn.Module):
             if verbose:
                 print('%g/%g %s -' % (i, len(self.module_list), mtype), list(x.shape), str)
                 str = ''
-        if seg_depth:
+        if self.seg_depth:
             target_shape = feats[-1].shape[-2:]
             feats = torch.cat([torch.nn.functional.interpolate(feat, target_shape, mode='bilinear', align_corners=False) for feat in feats], dim=1)
+            feats = self.shared_head(feats)
+            feats_shape = feats.shape[-2:]
+            _input = torch.nn.functional.interpolate(_input, feats_shape)
+            feats = torch.cat([_input, feats], dim=1)
             seg = self.seg_head(feats)
             depth = self.depth_head(feats)
 
@@ -330,10 +344,16 @@ class Darknet(nn.Module):
             return yolo_out
         elif ONNX_EXPORT:  # export
             x = [torch.cat(x, 0) for x in zip(*yolo_out)]
-            return x[0], torch.cat(x[1:3], 1)  # scores, boxes: 3780x80, 3780x4
+            if self.seg_depth:
+                return x[0], torch.cat(x[1:3], 1), seg, depth  # scores, boxes: 3780x80, 3780x4, segmentation, depth
+            else:
+                return x[0], torch.cat(x[1:3], 1)  # scores, boxes: 3780x80, 3780x4
         else:  # test
             io, p = zip(*yolo_out)  # inference output, training output
-            return torch.cat(io, 1), p
+            if self.seg_depth:
+                return torch.cat(io, 1), p, seg, depth
+            else:
+                return torch.cat(io, 1), p
 
     def fuse(self):
         # Fuse Conv2d + BatchNorm2d layers throughout model

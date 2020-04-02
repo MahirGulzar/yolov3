@@ -444,7 +444,8 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
     if target_depth is not None:
         loss += torch.nn.functional.l1_loss(torch.nn.functional.interpolate(pred_depth, target_depth.shape[-2:], mode='bilinear', align_corners=False), target_depth)
     if target_seg is not None:
-        loss += torch.nn.functional.cross_entropy(torch.nn.functional.interpolate(pred_seg, target_seg.shape[-2:], mode='bilinear', align_corners=False), target_seg)
+        pred_resized = torch.nn.functional.interpolate(pred_seg, target_seg.shape[-2:], mode='bilinear', align_corners=False)
+        loss += torch.nn.functional.cross_entropy(pred_resized, target_seg.squeeze(1))
     if not torch.isnan(ldist):
         loss += ldist
     else:
