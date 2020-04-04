@@ -4,7 +4,45 @@ from sys import platform
 from models import *  # set ONNX_EXPORT in models.py
 from utils.datasets import *
 from utils.utils import *
-
+import numpy as np
+MILREM_COLORMAP = np.array([
+    [0, 0, 0],
+    [249, 12, 190],
+    [85, 85, 85],
+    [128, 64, 128],
+    [153, 204, 102],
+    [255, 153, 0],
+    [255, 0, 0], # Human
+    [0, 0, 142],
+    [0, 0, 70],
+    [0, 60, 100],
+    [0, 0, 230],
+    [119, 11, 32],
+    [193, 58, 58],
+    [173, 10, 10],
+    [22, 73, 38],
+    [10, 199, 252],
+    [70, 70, 70],
+    [102, 102, 156],
+    [190, 153, 153],
+    [180, 165, 180],
+    [150, 100, 100],
+    [150, 120, 90],
+    [142, 114, 68],
+    [193, 196, 47],
+    [31, 70, 107],
+    [99, 4, 96],
+    [0, 255, 0],
+    [51, 255, 255],
+    [52, 251, 152],
+    [0, 114, 54],
+    [96, 57, 19],
+    [224, 143, 62],
+    [45, 216, 199],
+    [0, 74, 128],
+    [155, 155, 155],
+    [255, 75, 3]
+], dtype=np.uint8)
 
 def detect(save_img=False):
     img_size = (320, 192) if ONNX_EXPORT else opt.img_size  # (320, 192) or (416, 256) or (608, 352) for (height, width)
@@ -18,7 +56,7 @@ def detect(save_img=False):
     os.makedirs(out)  # make new output folder
 
     # Initialize model
-    model = Darknet(opt.cfg, img_size)
+    model = Darknet(opt.cfg, img_size, seg_depth=opt.use_seg_depth)
 
     # Load weights
     attempt_download(weights)
@@ -67,7 +105,7 @@ def detect(save_img=False):
         dataset = LoadStreams(source, img_size=img_size)
     else:
         save_img = True
-        dataset = LoadImages(source, img_size=img_size)
+        dataset = LoadImages(source, img_size=img_size, ignore_seg_depth=True)
 
     # Get names and colors
     names = load_classes(opt.names)
@@ -84,7 +122,14 @@ def detect(save_img=False):
 
         # Inference
         t1 = torch_utils.time_synchronized()
-        pred = model(img)[0].float() if half else model(img)[0]
+        if opt.use_seg_depth:
+            pred = model(img)
+            pred, p, seg, depth = pred
+            pred = pred.float()
+            seg = seg[0] 
+            depth = depth[0]
+        else:
+            pred = model(img)[0].float() if half else model(img)[0]
         t2 = torch_utils.time_synchronized()
 
         # Apply NMS
@@ -124,10 +169,22 @@ def detect(save_img=False):
 
             # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, t2 - t1))
-
+            if opt.use_seg_depth:
+                w, h, c = im0.shape
+                print(depth.shape)
+                depth = torch.nn.functional.interpolate(depth.unsqueeze(1), (w, h), mode='bilinear', align_corners=False)
+                depth = ((depth * 128) + 128).cpu().squeeze().numpy()
+                seg = torch.nn.functional.interpolate(seg.unsqueeze(0), (w, h), mode='bilinear', align_corners=False)
+                seg = seg.argmax(dim=1).cpu().squeeze().int().numpy()
+                seg_color = MILREM_COLORMAP[seg]
+                seg_color = cv2.cvtColor(seg_color, cv2.COLOR_RGB2BGR)
+                im0 = 0.5 * im0 + 0.5 * seg_color
             # Stream results
             if view_img:
+                if opt.use_seg_depth:
+                    cv2.imshow(p + "depth", depth)
                 cv2.imshow(p, im0)
+
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
@@ -135,6 +192,9 @@ def detect(save_img=False):
             if save_img:
                 if dataset.mode == 'images':
                     cv2.imwrite(save_path, im0)
+                    if opt.use_seg_depth:
+                        cv2.imwrite(save_path[:-4] + "_depth.png", depth)
+
                 else:
                     if vid_path != save_path:  # new video
                         vid_path = save_path
@@ -172,6 +232,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
+    parser.add_argument('--use_seg_depth', action='store_true', help='Load segmentation and depth')
     opt = parser.parse_args()
     print(opt)
 
