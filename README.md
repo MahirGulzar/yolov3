@@ -1,3 +1,13 @@
+# Yolov3 with object distance, semantic segmentation and depth map prediction
+
+## Semantic segmentation and depth
+To train semantic segmentation and depth, you need to:
+1. Have semantic segmentation and depth targets in the same folder of the training images, for image `example.jpg`, the segmentation and depth should be `example_seg.png` and `example_depth.png`
+2. Set the `--use_seg_depth`, `--notest` and `--rect` flags
+To test, simply add `--use_seg_depth` flag to `python detect.py`
+
+
+
 <table style="width:100%">
   <tr>
     <td>
