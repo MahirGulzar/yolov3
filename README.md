@@ -1,3 +1,18 @@
+# Yolov3 with object distance, semantic segmentation and depth map prediction
+
+## Object Distance Estimation
+To train object detection along with distance estimation, you need to:
+1. Have distance ground truths normalized within [0-1] and added to .txt label files as the sixth value in each row. If there's no ground truth for an object in an image, put **-1** instead.
+2. To test, you can use `python detect.py`, by default, distance estimation will be made. 
+
+## Semantic segmentation and depth
+To train semantic segmentation and depth, you need to:
+1. Have semantic segmentation and depth targets in the same folder of the training images, for image `example.jpg`, the segmentation and depth should be `example_seg.png` and `example_depth.png`
+2. Set the `--use_seg_depth`, `--notest` and `--rect` flags
+To test, simply add `--use_seg_depth` flag to `python detect.py`
+
+
+
 <table style="width:100%">
   <tr>
     <td>

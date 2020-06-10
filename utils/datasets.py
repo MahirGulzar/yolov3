@@ -42,11 +42,14 @@ def exif_size(img):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, img_size=416):
+    def __init__(self, path, img_size=416, ignore_seg_depth=False):
         path = str(Path(path))  # os-agnostic
         files = []
         if os.path.isdir(path):
             files = sorted(glob.glob(os.path.join(path, '*.*')))
+            if ignore_seg_depth:
+                files = [_file for _file in files if "seg" not in _file and "depth" not in _file]
+
         elif os.path.isfile(path):
             files = [path]
 
@@ -257,7 +260,7 @@ class LoadStreams:  # multiple IP or RTSP cameras
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_labels=True, cache_images=False, single_cls=False):
+                 cache_labels=True, cache_images=False, single_cls=False, use_seg_depth=False):
         path = str(Path(path))  # os-agnostic
         assert os.path.isfile(path), 'File not found %s. See %s' % (path, help_url)
         with open(path, 'r') as f:
@@ -268,7 +271,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         assert n > 0, 'No images found in %s. See %s' % (path, help_url)
         bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
         nb = bi[-1] + 1  # number of batches
-
+        
+        self.use_seg_depth = use_seg_depth # Flag to also load depth and segmentation targets
         self.n = n
         self.batch = bi  # batch index of image
         self.img_size = img_size
@@ -419,6 +423,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         hyp = self.hyp
         if self.mosaic:
+            print("mosaic")
             # Load mosaic
             img, labels = load_mosaic(self, index)
             shapes = None
@@ -426,6 +431,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         else:
             # Load image
             img, (h0, w0), (h, w) = load_image(self, index)
+            if self.use_seg_depth:
+                img_path = self.img_files[index]
+                seg_path = img_path[:-4] + "_seg.png"
+                depth_path = img_path[:-4] + "_depth.png"
+                seg = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)  # segmentation is in grayscale
+                seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST) 
+                depth = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)  # depth is in grayscale
+                depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST) 
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
@@ -452,11 +465,19 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if self.augment:
             # Augment imagespace
             if not self.mosaic:
-                img, labels = random_affine(img, labels,
-                                            degrees=hyp['degrees'],
-                                            translate=hyp['translate'],
-                                            scale=hyp['scale'],
-                                            shear=hyp['shear'])
+                if self.use_seg_depth:
+                    img, labels, seg, depth = random_affine(img, labels,
+                                                seg=seg, depth=depth,
+                                                degrees=hyp['degrees'],
+                                                translate=hyp['translate'],
+                                                scale=hyp['scale'],
+                                                shear=hyp['shear'])
+                else:
+                    img, labels = random_affine(img, labels,
+                                                degrees=hyp['degrees'],
+                                                translate=hyp['translate'],
+                                                scale=hyp['scale'],
+                                                shear=hyp['shear'])
 
             # Augment colorspace
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
@@ -478,6 +499,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # random left-right flip
             lr_flip = True
             if lr_flip and random.random() < 0.5:
+                if self.use_seg_depth:
+                    seg = np.fliplr(seg)
+                    depth = np.fliplr(depth)
                 img = np.fliplr(img)
                 if nL:
                     labels[:, 1] = 1 - labels[:, 1]
@@ -485,6 +509,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # random up-down flip
             ud_flip = False
             if ud_flip and random.random() < 0.5:
+                if self.use_seg_depth:
+                    seg = np.flipud(seg)
+                    depth = np.flipud(depth)
                 img = np.flipud(img)
                 if nL:
                     labels[:, 2] = 1 - labels[:, 2]
@@ -496,15 +523,24 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
-
+        seg = np.ascontiguousarray(seg)
+        depth = np.ascontiguousarray(depth)
+        if self.use_seg_depth:
+            return torch.from_numpy(img), labels_out, img_path, shapes, torch.from_numpy(seg).unsqueeze(0), torch.from_numpy(depth).unsqueeze(0)
         return torch.from_numpy(img), labels_out, img_path, shapes
 
-    @staticmethod
-    def collate_fn(batch):
-        img, label, path, shapes = zip(*batch)  # transposed
-        for i, l in enumerate(label):
-            l[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(img, 0), torch.cat(label, 0), path, shapes
+#    @staticmethod
+    def collate_fn(self, batch):
+        if self.use_seg_depth:
+            img, label, path, shapes, seg, depth = zip(*batch)  # transposed
+            for i, l in enumerate(label):
+                l[:, 0] = i  # add target image index for build_targets()
+            return torch.stack(img, 0), torch.cat(label, 0), path, shapes, torch.stack(seg, 0), torch.stack(depth, 0)
+        else:
+            img, label, path, shapes = zip(*batch)  # transposed
+            for i, l in enumerate(label):
+                l[:, 0] = i  # add target image index for build_targets()
+            return torch.stack(img, 0), torch.cat(label, 0), path, shapes
 
 
 def load_image(self, index):
@@ -632,7 +668,7 @@ def letterbox(img, new_shape=(416, 416), color=(128, 128, 128),
     return img, ratio, (dw, dh)
 
 
-def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10, border=0):
+def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10, border=0, seg=None, depth=None):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # https://medium.com/uruvideo/dataset-augmentation-with-random-homographies-a8f4b44830d4
 
@@ -663,6 +699,8 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
     changed = (border != 0) or (M != np.eye(3)).any()
     if changed:
         img = cv2.warpAffine(img, M[:2], dsize=(width, height), flags=cv2.INTER_AREA, borderValue=(128, 128, 128))
+        if seg is not None: seg = cv2.warpAffine(seg, M[:2], dsize=(width, height), flags=cv2.INTER_NEAREST, borderValue=(0))
+        if depth is not None: depth = cv2.warpAffine(depth, M[:2], dsize=(width, height), flags=cv2.INTER_NEAREST, borderValue=(0))
 
     # Transform label coordinates
     n = len(targets)
@@ -698,6 +736,9 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
 
         targets = targets[i]
         targets[:, 1:5] = xy[i]
+
+    if depth is not None and seg is not None:
+        return img, targets, seg, depth  
 
     return img, targets
 
