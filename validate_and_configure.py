@@ -10,7 +10,7 @@ CLASSES = ['person', 'car']
 if __name__ == "__main__":
     # Iterate through training and test datasets
     for sub_path in SUB_PATHS:
-        img_paths = sorted([glob.glob(os.path.join(DATA_PATH, "*.%s"))%ext for ext in IMG_EXT_TYPES])  
+        img_paths = sorted([glob.glob(os.path.join(DATA_PATH, "*.%s")%ext) for ext in IMG_EXT_TYPES])  
         # Check if images exist
         if len(img_paths) == 0:
             raise ValueError('No image files were found in the given path', DATA_PATH)
