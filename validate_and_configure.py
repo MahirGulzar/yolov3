@@ -3,7 +3,7 @@ import glob
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = '/home/data/yolo'
-SUB_PATHS = ['train', 'test']
+SUB_PATHS = ['train', 'valid']
 IMG_EXT_TYPES = ['png', 'jpg']
 CLASSES = ['person', 'car']
 

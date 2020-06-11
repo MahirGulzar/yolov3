@@ -423,7 +423,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         hyp = self.hyp
         if self.mosaic:
-            print("mosaic")
+            #print("mosaic")
             # Load mosaic
             img, labels = load_mosaic(self, index)
             shapes = None
@@ -523,9 +523,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
-        seg = np.ascontiguousarray(seg)
-        depth = np.ascontiguousarray(depth)
+        
         if self.use_seg_depth:
+            seg = np.ascontiguousarray(seg)
+            depth = np.ascontiguousarray(depth)
             return torch.from_numpy(img), labels_out, img_path, shapes, torch.from_numpy(seg).unsqueeze(0), torch.from_numpy(depth).unsqueeze(0)
         return torch.from_numpy(img), labels_out, img_path, shapes
 

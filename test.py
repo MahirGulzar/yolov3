@@ -171,11 +171,11 @@ def test(cfg,
                     if pi.shape[0]:
                         # Prediction to target ious
                         ious, i = box_iou(pred[pi, :4], tbox[ti]).max(1)  # best ious, indices
-                        #print(i.shape,ti.shape,pi.shape, tdist.shape, tbox.shape)
+                        #print(ious.shape,i.shape,ti.shape,pi.shape, tdist.shape, tbox.shape)
                         # Append detections
                         for j in (ious > iouv[0]).nonzero():
                             d = ti[i[j]]  # detected target
-                            pred_for_d = pred[i[j]]
+                            pred_for_d = pred[pi[i[j]],-1]
                             if i[j] < len(tdist):
                                 dist_for_d = tdist[i[j]]
                             else:
@@ -184,7 +184,7 @@ def test(cfg,
                                 detected.append(d)
                                 if dist_for_d > 0:
                                     dist_count += 1
-                                    RMSE += (pred_for_d.squeeze()[-1]-dist_for_d)**2
+                                    RMSE += (pred_for_d-dist_for_d)**2
                                 correct[pi[j]] = ious[j] > iouv  # iou_thres is 1xn
                                 if len(detected) == nl:  # all targets already located in image
                                     break

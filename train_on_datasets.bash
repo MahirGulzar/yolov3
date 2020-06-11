@@ -1,3 +1,5 @@
+args=("$@")
+
 # Validate and Configure the training
 python validate_and_configure.py
 
@@ -8,4 +10,4 @@ if [[ ! -f yolov3.conv.81 ]]
   fi
 
 # Start training
-python train.py --data custom.data --weights yolov3.conv.81  --cfg yolov3_custom.cfg --epochs 100 --multi-scale
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=${args[0]} python train.py --cfg yolov3_custom.cfg --data custom.data  --epochs 100 --weights yolov3.conv.81 --multi-scale
