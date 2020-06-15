@@ -14,7 +14,7 @@ if __name__ == "__main__":
                         help="Dataset name for cross-validation. Leave empty for training on all of the data", default='ALL')
     args = parser.parse_args()
     if args.dataset == 'ALL':
-        dataset_folders = [os.path.join(DATA_PATH,ds_name) for ds_name in os.listdir(DATA_PATH)]
+        dataset_folders = [os.path.join(DATA_PATH,ds_name) for ds_name in os.listdir(DATA_PATH) if 'check' not in ds_name] # exclude checkpoints folder
     else:
         dataset_folders = [os.path.join(DATA_PATH,args.dataset)]
     
