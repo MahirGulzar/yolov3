@@ -1,7 +1,7 @@
 args=("$@")
 
 # Checkpoint directory
-CHKPT_DIR=/home/data/Train_Unified_Yolo/checkpoints_$(date +%Y-%m-%d:%H:%M:%S)
+CHKPT_DIR=/home/data/unified_yolo_checkpoints/checkpoints_$(date +%Y-%m-%d:%H:%M:%S)
 mkdir -p $CHKPT_DIR
 
 # Validate and Configure the training
