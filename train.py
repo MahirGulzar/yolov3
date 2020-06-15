@@ -358,13 +358,15 @@ def train():
         # Save training results
         save = (not opt.nosave) or (final_epoch and not opt.evolve)
         if save:
-            with open(results_file, 'r') as f:
+            with open(results_file, 'w') as f:
                 # Create checkpoint
                 chkpt = {'epoch': epoch,
                          'best_fitness': best_fitness,
-                         'training_results': f.read(),
                          'model': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
                          'optimizer': None if final_epoch else optimizer.state_dict()}
+
+                if not opt.notest:
+                    chkpt['training_results']: f.read()
 
             # Save last checkpoint
             torch.save(chkpt, last)
@@ -411,7 +413,7 @@ if __name__ == '__main__':
     parser.add_argument('--accumulate', type=int, default=8, help='batches to accumulate before optimizing')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='*.cfg path')
     parser.add_argument('--data', type=str, default='data/coco2017.data', help='*.data path')
-    parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
+    parser.add_argument('--multi-scale', action='store_true', help='adjust (67%% - 150%%) img_size every 10 batches')
     parser.add_argument('--img-size', nargs='+', type=int, default=[416], help='train and test image-sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
