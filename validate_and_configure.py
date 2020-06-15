@@ -12,7 +12,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str,
                         help="Dataset name for cross-validation. Leave empty for training on all of the data", default='ALL')
+    parser.add_argument("--data_path", type=str, help="Dataset path, defaults to {}".format(DATA_PATH))
     args = parser.parse_args()
+    if args.data_path is not None:
+        DATA_PATH = args.data_path
+
     if args.dataset == 'ALL':
         dataset_folders = [os.path.join(DATA_PATH,ds_name) for ds_name in os.listdir(DATA_PATH) if 'check' not in ds_name] # exclude checkpoints folder
     else:

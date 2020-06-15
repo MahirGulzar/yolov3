@@ -366,8 +366,8 @@ def train():
                'optimizer': None if final_epoch else optimizer.state_dict()
             }
 
-            with open(results_file, 'r') as f:
-                if not opt.notest:
+            if not opt.notest:
+                with open(results_file, 'r') as f:
                     chkpt['training_results']: f.read()
 
             # Save last checkpoint
