@@ -18,6 +18,10 @@ if __name__ == "__main__":
     else:
         dataset_folders = [os.path.join(DATA_PATH,args.dataset)]
     
+    # Remove remnant files
+    for f in glob.glob(os.path.join(CURRENT_DIR,'data','custom*')):
+        os.remove(f)
+    
     # Iterate through separate dataset folders
     for dataset in dataset_folders:
         # Iterate through training and test datasets
