@@ -358,13 +358,15 @@ def train():
         # Save training results
         save = (not opt.nosave) or (final_epoch and not opt.evolve)
         if save:
-            with open(results_file, 'w') as f:
-                # Create checkpoint
-                chkpt = {'epoch': epoch,
-                         'best_fitness': best_fitness,
-                         'model': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
-                         'optimizer': None if final_epoch else optimizer.state_dict()}
+            # Create checkpoint
+            chkpt = {
+               'epoch': epoch,
+               'best_fitness': best_fitness,
+               'model': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
+               'optimizer': None if final_epoch else optimizer.state_dict()
+            }
 
+            with open(results_file, 'r') as f:
                 if not opt.notest:
                     chkpt['training_results']: f.read()
 
