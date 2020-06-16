@@ -14,7 +14,7 @@ if [[ ! -f yolov3.conv.81 ]]
   fi
 
 # Start training
-CUDA_LAUNCH_BLOCKING=1 python train.py --cfg yolov3_custom.cfg --data custom.data --epochs 1 --weights yolov3.conv.81 --multi-scale --use_seg_depth --rect --notest
+python train.py --cfg yolov3_custom.cfg --data custom.data --epochs 1 --weights yolov3.conv.81 --multi-scale --use_seg_depth --rect --notest
 
 cp -r runs $CHKPT_DIR/
 cp -r weights $CHKPT_DIR/
