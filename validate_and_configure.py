@@ -10,52 +10,50 @@ CLASSES = ['person', 'car']
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str,
-                        help="Dataset name for cross-validation. Leave empty for training on all of the data", default='ALL')
-    parser.add_argument("--data_path", type=str, help="Dataset path, defaults to {}".format(DATA_PATH))
+    parser.add_argument("chkpt_dir", type=str,
+                        help="Checkpoint direcory for saving the weights")
+    parser.add_argument("--data_path", type=str,
+                        help='Main data folder containing different datasets in subfolders', default='/home/data/Train_Yolov3_Torch')                    
     args = parser.parse_args()
-    if args.data_path is not None:
-        DATA_PATH = args.data_path
 
-    if args.dataset == 'ALL':
-        dataset_folders = [os.path.join(DATA_PATH,ds_name) for ds_name in os.listdir(DATA_PATH) if 'check' not in ds_name] # exclude checkpoints folder
-    else:
-        dataset_folders = [os.path.join(DATA_PATH,args.dataset)]
+    DATA_PATH = args.data_path
+    CHKPT_DIR = os.path.join(f'{DATA_PATH}_Checkpoints',args.chkpt_dir)
+
+    os.makedirs(CHKPT_DIR,exist_ok=True)
     
+    with open('log_file.txt','w+') as f:
+        f.write(CHKPT_DIR)
+
     # Remove remnant files
     for f in glob.glob(os.path.join(CURRENT_DIR,'data','custom*')):
         os.remove(f)
+
+    img_paths = []
+    for ext in IMG_EXT_TYPES:
+        img_paths.extend(glob.glob(os.path.join(
+            DATA_PATH, '**', '*.%s' % ext), recursive=True))
     
-    # Iterate through separate dataset folders
-    for dataset in dataset_folders:
-        # Iterate through training and test datasets
-        for sub_path in SUB_PATHS:
-            img_paths = []
+    img_paths = [img for img in img_paths if 'depth' not in img and 'seg' not in img] #Exclude irrelevant images
 
-            for ext in IMG_EXT_TYPES:
-                img_paths.extend(glob.glob(os.path.join(dataset, sub_path, "*.%s") % ext))
-            # Exclude segmentation and depth ground truths
-            img_paths = sorted(
-                img for img in img_paths if 'depth' not in img and 'seg' not in img)
+    # Check if images exist
+    if len(img_paths) == 0:
+        raise ValueError(
+            'No image files were found in the given path', os.path.join(DATA_PATH))
 
-            # Check if images exist
-            if len(img_paths) == 0:
-                raise ValueError(
-                    'No image files were found in the given path', os.path.join(dataset,sub_path))
+    # There must be a text file corresponding to each image
+    for img_path in img_paths:
+        dir_name = os.path.dirname(img_path)
+        file_name = os.path.splitext(os.path.basename(img_path))[0]
+        label_file = os.path.join(dir_name, '%s.txt' % file_name)
+        if not os.path.exists(label_file):
+            raise ValueError(
+                'No label file was found for the given image', img_path)
 
-            # There must be a text file corresponding to each image
-            for img_path in img_paths:
-                dir_name = os.path.dirname(img_path)
-                file_name = os.path.splitext(os.path.basename(img_path))[0]
-                label_file = os.path.join(dir_name, '%s.txt' % file_name)
-                if not os.path.exists(label_file):
-                    raise ValueError(
-                        'No label file was found for the given image', img_path)
-
-            # Populate train and test text files
-            gt_file = os.path.join(CURRENT_DIR, "data", "custom_%s.txt" % sub_path)
-            with open(gt_file, 'a+') as f:
-                f.write('\n'.join(img_paths))
+    # Populate train and test text files
+    for ds in ['valid', 'train']:
+        gt_file = os.path.join(CURRENT_DIR, "data", "custom_%s.txt" % ds)
+        with open(gt_file, 'a+') as f:
+            f.write('\n'.join(img_paths))
 
     # Create if data file does not exist
     # Override if necessary
