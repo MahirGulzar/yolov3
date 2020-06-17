@@ -373,7 +373,7 @@ def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#iss
 
 
 def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # predictions, targets, model
-    if target_seg is not None and target_depth is not None:
+    if target_seg is not None or target_depth is not None:
         p, pred_seg, pred_depth = p
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
     lcls, lbox, lobj, ldist = ft([0]), ft([0]), ft([0]), ft([0])
@@ -441,9 +441,9 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
             lcls *= 3 / ng / model.nc
             lbox *= 3 / ng
     loss = lbox + lobj + lcls
-    if target_depth is not None:
+    if pred_depth is not None and target_depth is not None:
         loss += torch.nn.functional.l1_loss(torch.nn.functional.interpolate(pred_depth, target_depth.shape[-2:], mode='bilinear', align_corners=False), target_depth)
-    if target_seg is not None:
+    if pred_seg is not None and target_seg is not None:
         pred_resized = torch.nn.functional.interpolate(pred_seg, target_seg.shape[-2:], mode='bilinear', align_corners=False)
         loss += torch.nn.functional.cross_entropy(pred_resized, target_seg.squeeze(1))
     if not torch.isnan(ldist):

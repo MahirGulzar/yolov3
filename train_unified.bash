@@ -6,8 +6,13 @@ mkdir -p $CHKPT_DIR
 # Validate and Configure the training
 python validate_and_configure.py
 
+# in $@, there should be:
+# --seg to train on segmentation
+# --depth to train on depth
+# --seg_classes to set how many classes segmentation has
+
 # Start training
-python train.py --cfg yolov3_custom.cfg --data custom.data --epochs 40 --weights yolov3.conv.81 --multi-scale --use_seg_depth --rect --notest
+python train.py --cfg yolov3_custom.cfg --data custom.data --epochs 40 --weights yolov3.conv.81 --multi-scale --rect --notest $@
 
 cp -r runs $CHKPT_DIR/
 cp weights/last.pt $CHKPT_DIR/yolov3_unified_semseg.pt

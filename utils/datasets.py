@@ -435,10 +435,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 img_path = self.img_files[index]
                 seg_path = img_path[:-4] + "_seg.png"
                 depth_path = img_path[:-4] + "_depth.png"
-                seg = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)  # segmentation is in grayscale
-                seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST) 
-                depth = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)  # depth is in grayscale
-                depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST) 
+                if os.path.exists(seg_path):
+                    seg = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)  # segmentation is in grayscale
+                    seg = cv2.resize(seg, (w, h), interpolation=cv2.INTER_NEAREST) 
+                else:
+                    seg = None
+                if os.path.exists(depth_path):
+                    depth = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)  # depth is in grayscale
+                    depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST)
+                else:
+                    depth = None
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
@@ -525,18 +531,22 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img = np.ascontiguousarray(img)
         
         if self.use_seg_depth:
-            seg = np.ascontiguousarray(seg)
-            depth = np.ascontiguousarray(depth)
-            return torch.from_numpy(img), labels_out, img_path, shapes, torch.from_numpy(seg).unsqueeze(0), torch.from_numpy(depth).unsqueeze(0)
+            if seg is not None:
+                seg = torch.from_numpy(np.ascontiguousarray(seg)).unsqueeze(0)
+            if depth is not None:
+                depth = torch.from_numpy(np.ascontiguousarray(depth)).unsqueeze(0)
+            return torch.from_numpy(img), labels_out, img_path, shapes, seg, depth
         return torch.from_numpy(img), labels_out, img_path, shapes
 
 #    @staticmethod
     def collate_fn(self, batch):
         if self.use_seg_depth:
             img, label, path, shapes, seg, depth = zip(*batch)  # transposed
+            segs = torch.stack(seg, 0) if seg[0] is not None else None
+            depths = torch.stack(depth, 0) if depth[0] is not None else None
             for i, l in enumerate(label):
                 l[:, 0] = i  # add target image index for build_targets()
-            return torch.stack(img, 0), torch.cat(label, 0), path, shapes, torch.stack(seg, 0), torch.stack(depth, 0)
+            return torch.stack(img, 0), torch.cat(label, 0), path, shapes, segs, depths
         else:
             img, label, path, shapes = zip(*batch)  # transposed
             for i, l in enumerate(label):
@@ -738,7 +748,7 @@ def random_affine(img, targets=(), degrees=10, translate=.1, scale=.1, shear=10,
         targets = targets[i]
         targets[:, 1:5] = xy[i]
 
-    if depth is not None and seg is not None:
+    if depth is not None or seg is not None:
         return img, targets, seg, depth  
 
     return img, targets

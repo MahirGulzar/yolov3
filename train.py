@@ -77,7 +77,7 @@ def train():
         os.remove(f)
 
     # Initialize model
-    model = Darknet(cfg, seg_depth=opt.use_seg_depth).to(device)
+    model = Darknet(cfg, seg=opt.seg, depth=opt.depth, seg_classes=opt.seg_classes).to(device)
 
     # Optimizer
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
@@ -117,7 +117,7 @@ def train():
             raise KeyError(s) from e
 
         # load optimizer
-        if chkpt['optimizer'] is not None and not opt.use_seg_depth:
+        if chkpt['optimizer'] is not None and not (opt.seg or opt.depth):
             print("loading optimizer")
             optimizer.load_state_dict(chkpt['optimizer'])
             best_fitness = chkpt['best_fitness']
@@ -127,7 +127,7 @@ def train():
             with open(results_file, 'w') as file:
                 file.write(chkpt['training_results'])  # write results.txt
 
-        if not opt.use_seg_depth: 
+        if not (opt.seg or opt.depth): 
             start_epoch = chkpt['epoch'] + 1
         del chkpt
 
@@ -171,7 +171,7 @@ def train():
                                   rect=opt.rect,  # rectangular training
                                   cache_images=opt.cache_images,
                                   single_cls=opt.single_cls,
-                                  use_seg_depth=opt.use_seg_depth)
+                                  use_seg_depth=(opt.seg or opt.depth))
 
     # Dataloader
     batch_size = min(batch_size, len(dataset))
@@ -240,7 +240,7 @@ def train():
         print(('\n' + '%10s' * 9) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'RMSE', 'targets', 'img_size'))
         pbar = tqdm(enumerate(dataloader), total=nb)  # progress bar
         for i, _batch in pbar:  # batch -------------------------------------------------------------
-            if opt.use_seg_depth:
+            if (opt.seg or opt.depth):
                 imgs, targets, paths, _, segs, depths = _batch
                 segs = segs.to(device).long()
                 depths = (depths.to(device).float() -128) / 128
@@ -279,9 +279,9 @@ def train():
                 if sf != 1:
                     ns = [math.ceil(x * sf / 32.) * 32 for x in imgs.shape[2:]]  # new shape (stretched to 32-multiple)
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
-                    if opt.use_seg_depth:
-                        segs = F.interpolate(segs.float(), size=ns, mode='nearest').long()
-                        depths = F.interpolate(depths, size=ns, mode='bilinear', align_corners=False)
+                    if (opt.seg or opt.depth):
+                        if segs is not None: segs = F.interpolate(segs.float(), size=ns, mode='nearest').long()
+                        if depths is not None: depths = F.interpolate(depths, size=ns, mode='bilinear', align_corners=False)
 
 
             # Run model
@@ -323,7 +323,7 @@ def train():
         # Process epoch results
         # ema.update_attr(model)
         final_epoch = epoch + 1 == epochs
-        if not opt.notest or (final_epoch and not opt.use_seg_depth):  # Calculate mAP
+        if not opt.notest or (final_epoch and not (opt.seg or opt.depth)):  # Calculate mAP
             is_coco = any([x in data for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
             results, maps = test.test(cfg,
                                       data,
@@ -430,7 +430,9 @@ if __name__ == '__main__':
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--var', type=float, help='debug variable')
-    parser.add_argument('--use_seg_depth', action="store_true", help='Train with segmentation and depth targets as well')
+    parser.add_argument('--seg', action="store_true", help='Train with segmentation targets as well')
+    parser.add_argument('--seg_classes', type=int, default=36, help='If training with segmentation, how many classes does it have')
+    parser.add_argument('--depth', action="store_true", help='Train with depth targets as well')
     opt = parser.parse_args()
     opt.weights = last if opt.resume else opt.weights
     print(opt)

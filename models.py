@@ -250,7 +250,7 @@ class YOLOLayer(nn.Module):
 class Darknet(nn.Module):
     # YOLOv3 object detection model
 
-    def __init__(self, cfg, img_size=(416, 416), seg_depth=False, seg_classes=36):
+    def __init__(self, cfg, img_size=(416, 416), seg=False, depth=False, seg_classes=36):
         super(Darknet, self).__init__()
 
         self.module_defs = parse_model_cfg(cfg)
@@ -261,8 +261,10 @@ class Darknet(nn.Module):
         self.version = np.array([0, 2, 5], dtype=np.int32)  # (int32) version info: major, minor, revision
         self.seen = np.array([0], dtype=np.int64)  # (int64) number of images seen during training
         self.info()  # print model description
-        self.seg_depth = seg_depth 
-        if seg_depth:
+        self.seg_depth = seg or depth 
+        self.seg = seg
+        self.depth = depth
+        if self.seg_depth:
             self.shared_head = torch.nn.Sequential(
                 torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
                 torch.nn.Conv2d(24 * 3, 64, kernel_size=3),
@@ -270,21 +272,23 @@ class Darknet(nn.Module):
                 torch.nn.BatchNorm2d(64),
                 torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
             )
-            self.seg_head = torch.nn.Sequential(
-                torch.nn.Conv2d(64 + 3, 32, kernel_size=3),
-                torch.nn.ReLU(),
-                torch.nn.BatchNorm2d(32),
-                torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-                torch.nn.Conv2d(32, seg_classes, kernel_size=3),
-            )
-            self.depth_head = torch.nn.Sequential(
-                torch.nn.Conv2d(64 + 3, 32, kernel_size=3),
-                torch.nn.ReLU(),
-                torch.nn.BatchNorm2d(32),
-                torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
-                torch.nn.Conv2d(32, 1, kernel_size=3),
-                torch.nn.Tanh(),
-            )
+            if self.seg:
+                self.seg_head = torch.nn.Sequential(
+                    torch.nn.Conv2d(64 + 3, 32, kernel_size=3),
+                    torch.nn.ReLU(),
+                    torch.nn.BatchNorm2d(32),
+                    torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+                    torch.nn.Conv2d(32, seg_classes, kernel_size=3),
+                )
+            if self.depth:
+                self.depth_head = torch.nn.Sequential(
+                    torch.nn.Conv2d(64 + 3, 32, kernel_size=3),
+                    torch.nn.ReLU(),
+                    torch.nn.BatchNorm2d(32),
+                    torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+                    torch.nn.Conv2d(32, 1, kernel_size=3),
+                    torch.nn.Tanh(),
+                )
 
     def forward(self, x, verbose=False):
         img_size = x.shape[-2:]
@@ -335,8 +339,11 @@ class Darknet(nn.Module):
             feats_shape = feats.shape[-2:]
             _input = torch.nn.functional.interpolate(_input, feats_shape)
             feats = torch.cat([_input, feats], dim=1)
-            seg = self.seg_head(feats)
-            depth = self.depth_head(feats)
+
+            if self.seg: seg = self.seg_head(feats)
+            else: seg = None
+            if self.depth: depth = self.depth_head(feats)
+            else: depth = None
 
         if self.training:  # train
             if self.seg_depth:
