@@ -431,11 +431,14 @@ if __name__ == '__main__':
     parser.add_argument('--single-cls', action='store_true', help='train as single-class dataset')
     parser.add_argument('--var', type=float, help='debug variable')
     parser.add_argument('--seg', action="store_true", help='Train with segmentation targets as well')
-    parser.add_argument('--seg_classes', type=int, default=36, help='If training with segmentation, how many classes does it have')
+    parser.add_argument('--seg_classes', type=int, help='If training with segmentation, how many classes does it have')
     parser.add_argument('--depth', action="store_true", help='Train with depth targets as well')
     opt = parser.parse_args()
     opt.weights = last if opt.resume else opt.weights
     print(opt)
+
+    assert opt.seg_classes is not None or not opt.seg, "Number of classes must be specified for segmentation"
+
     device = torch_utils.select_device(opt.device, apex=mixed_precision, batch_size=opt.batch_size)
     if device.type == 'cpu':
         mixed_precision = False
