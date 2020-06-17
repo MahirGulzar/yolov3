@@ -1,4 +1,6 @@
 
+set -e
+
 # Checkpoint directory
 CHKPT_DIR=/home/data/unified_yolo_checkpoints/checkpoints_$(date +%Y-%m-%d:%H:%M:%S)
 mkdir -p $CHKPT_DIR
