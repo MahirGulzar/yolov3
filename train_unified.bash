@@ -5,12 +5,13 @@ set -e
 CHKPT_DIR=/home/data/unified_yolo_checkpoints/checkpoints_$(date +%Y-%m-%d:%H:%M:%S)
 mkdir -p /home/checkpoint_dir
 data_path=$1
-model_name=$2
+shift
+model_name=$1
+shift
 
 # Validate and Configure the training
-python validate_and_configure.py /home/checkpoint_dir --data_path $1 
+python validate_and_configure.py /home/checkpoint_dir --data_path $data_path
 
-shift
 
 # in $@, there should be:
 # --seg to train on segmentation
