@@ -6,7 +6,7 @@ CHKPT_DIR=/home/data/unified_yolo_checkpoints/checkpoints_$(date +%Y-%m-%d:%H:%M
 mkdir -p $CHKPT_DIR
 
 # Validate and Configure the training
-python validate_and_configure.py --data_path $1
+python validate_and_configure.py $CHKPT_DIR --data_path $1 
 
 shift
 
