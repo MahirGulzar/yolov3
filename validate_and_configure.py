@@ -17,12 +17,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     DATA_PATH = args.data_path
-    CHKPT_DIR = os.path.join(f'{DATA_PATH}_Checkpoints',args.chkpt_dir)
-
-    os.makedirs(CHKPT_DIR,exist_ok=True)
+    CHKPT_DIR = os.path.abspath(args.chkpt_dir)
     
-    with open('log_file.txt','w+') as f:
-        f.write(CHKPT_DIR)
+    os.makedirs(CHKPT_DIR,exist_ok=True)
 
     # Remove remnant files
     for f in glob.glob(os.path.join(CURRENT_DIR,'data','custom*')):

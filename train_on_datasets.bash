@@ -1,7 +1,9 @@
 args=("$@")
 
-# Checkpoint directory
-CHKPT_DIR=checkpoints_$(date +%Y-%m-%d:%H:%M:%S)
+# Checkpoint, Data directories and Model name
+CHKPT_DIR=${CHKPT_PATH}
+DATA_PATH=${DATA_PATH}
+MODEL_NAME=${MODEL_NAME}
 
 # Validate and Configure the training
 python validate_and_configure.py $CHKPT_DIR --data_path ${DATA_PATH}
@@ -13,8 +15,7 @@ if [[ ! -f yolov3.conv.81 ]]
   fi
 
 # Start training
-value=$(<log_file.txt)
 CUDA_LAUNCH_BLOCKING=1 python train.py --cfg yolov3_custom.cfg --data custom.data  --epochs 50 --weights yolov3.conv.81 --multi-scale
 
-cp -r runs ${value}/
-cp -r weights ${value}/
+cp -r runs ${CHKPT_DIR}/
+cp -r weights/best.pt ${CHKPT_DIR}/${MODEL_NAME}
