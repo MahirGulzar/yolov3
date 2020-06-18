@@ -373,6 +373,9 @@ def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#iss
 
 
 def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # predictions, targets, model
+    pred_seg = None 
+    pred_depth = None 
+
     if target_seg is not None or target_depth is not None:
         p, pred_seg, pred_depth = p
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
