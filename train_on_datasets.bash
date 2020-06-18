@@ -14,7 +14,7 @@ if [[ ! -f yolov3.conv.81 ]]
 
 # Start training
 value=$(<log_file.txt)
-CUDA_LAUNCH_BLOCKING=1 python train.py --cfg yolov3_custom.cfg --data custom.data  --epochs 1 --weights yolov3.conv.81 --multi-scale
+CUDA_LAUNCH_BLOCKING=1 python train.py --cfg yolov3_custom.cfg --data custom.data  --epochs 50 --weights yolov3.conv.81 --multi-scale
 
 cp -r runs ${value}/
 cp -r weights ${value}/
