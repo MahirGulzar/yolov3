@@ -12,11 +12,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("chkpt_dir", type=str,
                         help="Checkpoint direcory for saving the weights")
-    parser.add_argument("--data_path", type=str,
-                        help='Main data folder containing different datasets in subfolders', default='/home/data/Train_Yolov3_Torch')                    
+    parser.add_argument("--train_data_path", type=str,
+                        help='Main data folder containing different datasets in subfolders', default='/home/data/Train_Darknet')
+    parser.add_argument("--val_data_path", type=str,
+                        help='Main data folder containing different datasets in subfolders', default='/home/data/Train_Darknet')
     args = parser.parse_args()
 
-    DATA_PATH = args.data_path
+    TRAIN_DATA_PATH = args.train_data_path
+    VAL_DATA_PATH = args.val_data_path
+    PATHS = [TRAIN_DATA_PATH,VAL_DATA_PATH]
     CHKPT_DIR = os.path.abspath(args.chkpt_dir)
     
     os.makedirs(CHKPT_DIR,exist_ok=True)
@@ -25,32 +29,33 @@ if __name__ == "__main__":
     for f in glob.glob(os.path.join(CURRENT_DIR,'data','custom*')):
         os.remove(f)
 
-    img_paths = []
-    for ext in IMG_EXT_TYPES:
-        img_paths.extend(glob.glob(os.path.join(
-            DATA_PATH, '**', '*.%s' % ext), recursive=True))
-    
-    img_paths = [img for img in img_paths if 'depth' not in img and 'seg' not in img] #Exclude irrelevant images
+    img_paths = [[],[]]
 
-    # Check if images exist
-    if len(img_paths) == 0:
-        raise ValueError(
-            'No image files were found in the given path', os.path.join(DATA_PATH))
+    for i,path in enumerate(PATHS):
+        for ext in IMG_EXT_TYPES:
+            img_paths[i].extend(glob.glob(os.path.join(
+                path, '**', '*.%s' % ext), recursive=True))
+        img_paths[i] = [img for img in img_paths[i] if 'depth' not in img and 'seg' not in img] #Exclude irrelevant images
 
-    # There must be a text file corresponding to each image
-    for img_path in img_paths:
-        dir_name = os.path.dirname(img_path)
-        file_name = os.path.splitext(os.path.basename(img_path))[0]
-        label_file = os.path.join(dir_name, '%s.txt' % file_name)
-        if not os.path.exists(label_file):
+        # Check if images exist
+        if len(img_paths[i]) == 0:
             raise ValueError(
-                'No label file was found for the given image', img_path)
+                'No image files were found in the given path', os.path.join(path))
+
+        # There must be a text file corresponding to each image
+        for img_path in img_paths[i]:
+            dir_name = os.path.dirname(img_path)
+            file_name = os.path.splitext(os.path.basename(img_path))[0]
+            label_file = os.path.join(dir_name, '%s.txt' % file_name)
+            if not os.path.exists(label_file):
+                raise ValueError(
+                    'No label file was found for the given image', img_path)
 
     # Populate train and test text files
-    for ds in ['valid', 'train']:
+    for ds, imgs in zip(['train', 'valid'], img_paths):
         gt_file = os.path.join(CURRENT_DIR, "data", "custom_%s.txt" % ds)
         with open(gt_file, 'a+') as f:
-            f.write('\n'.join(img_paths))
+            f.write('\n'.join(imgs))
 
     # Create if data file does not exist
     # Override if necessary
