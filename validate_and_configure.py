@@ -55,17 +55,14 @@ if __name__ == "__main__":
                 raise ValueError(
                     'No label file was found for the given image', img_path)
 
-    
-    if not args.unified:
-        datasets = ['train', 'valid']
-    else:
-        datasets = ['train', 'train']
+    datasets = ['train', 'valid']
 
     # Populate train and test text files
     for ds, imgs in zip(datasets, img_paths):
         gt_file = os.path.join(CURRENT_DIR, "data", "custom_%s.txt" % ds)
         with open(gt_file, 'a+') as f:
             f.write('\n'.join(imgs))
+            f.write('\n')
 
     # Create if data file does not exist
     # Override if necessary
