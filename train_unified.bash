@@ -9,7 +9,7 @@ model_name=$1
 shift
 
 # Validate and Configure the training
-python validate_and_configure.py /home/checkpoint_dir --data_path $data_path
+python validate_and_configure.py /home/checkpoint_dir --train_data_path $data_path --unified
 
 
 # in $@, there should be:

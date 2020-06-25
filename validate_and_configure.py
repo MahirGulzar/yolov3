@@ -16,11 +16,15 @@ if __name__ == "__main__":
                         help='Main data folder containing different datasets in subfolders', default='/home/data/Train_Darknet')
     parser.add_argument("--val_data_path", type=str,
                         help='Main data folder containing different datasets in subfolders', default='/home/data/Train_Darknet')
+    parser.add_argument("--unified", action='store_true', help="Flag showing that the training is for unified Yolo")
     args = parser.parse_args()
 
     TRAIN_DATA_PATH = args.train_data_path
-    VAL_DATA_PATH = args.val_data_path
-    PATHS = [TRAIN_DATA_PATH,VAL_DATA_PATH]
+    if not args.unified:
+        VAL_DATA_PATH = args.val_data_path
+    else:
+        VAL_DATA_PATH = TRAIN_DATA_PATH
+    PATHS = [TRAIN_DATA_PATH, VAL_DATA_PATH]
     CHKPT_DIR = os.path.abspath(args.chkpt_dir)
     
     os.makedirs(CHKPT_DIR,exist_ok=True)
@@ -51,8 +55,14 @@ if __name__ == "__main__":
                 raise ValueError(
                     'No label file was found for the given image', img_path)
 
+    
+    if not args.unified:
+        datasets = ['train', 'valid']
+    else:
+        datasets = ['train', 'train']
+
     # Populate train and test text files
-    for ds, imgs in zip(['train', 'valid'], img_paths):
+    for ds, imgs in zip(datasets, img_paths):
         gt_file = os.path.join(CURRENT_DIR, "data", "custom_%s.txt" % ds)
         with open(gt_file, 'a+') as f:
             f.write('\n'.join(imgs))
