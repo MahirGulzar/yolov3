@@ -2,11 +2,12 @@ args=("$@")
 
 # Checkpoint, Data directories and Model name
 CHKPT_DIR=${CHKPT_PATH}
-DATA_PATH=${DATA_PATH}
+TRAIN_DATA_PATH=${TRAIN_DATA_PATH}
+VAL_DATA_PATH=${VAL_DATA_PATH}
 MODEL_NAME=${MODEL_NAME}
 
 # Validate and Configure the training
-python validate_and_configure.py $CHKPT_DIR --data_path ${DATA_PATH}
+python validate_and_configure.py $CHKPT_DIR --train_data_path ${TRAIN_DATA_PATH} --val_data_path ${VAL_DATA_PATH}
 
 # Yolov3.conv.81 required for finetuning 
 if [[ ! -f yolov3.conv.81 ]]
