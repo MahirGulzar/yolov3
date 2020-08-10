@@ -67,11 +67,11 @@ def test(cfg,
     seen = 0
     model.eval()
     coco91class = coco80_to_coco91_class()
-    s = ('%20s' + '%10s' * 7) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1', 'RMSE')
-    p, r, f1, mp, mr, map, mf1, t0, t1, RMSE = 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
-    loss = torch.zeros(4, device=device)
+    s = ('%20s' + '%10s' * 8) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@0.5', 'F1', 'Dist_RMSE', 'Yaw_RMSE')
+    p, r, f1, mp, mr, map, mf1, t0, t1, d_RMSE, y_RMSE = 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    loss = torch.zeros(5, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
-    dist_count = 0
+    yaw_count = dist_count = 0
     for batch_i, _batch in enumerate(tqdm(dataloader, desc=s)):
         if use_seg_depth:
             (imgs, targets, paths, shapes, segs, depths) = _batch
@@ -161,7 +161,8 @@ def test(cfg,
 
                 # target boxes
                 tbox = xywh2xyxy(labels[:, 1:5]) * whwh
-                tdist = labels[:,-1]
+                tdist = labels[:,-2]
+                tyaw = labels[:,-1]
 
                 # Per target class
                 for cls in torch.unique(tcls_tensor):
@@ -175,23 +176,32 @@ def test(cfg,
                         # Append detections
                         for j in (ious > iouv[0]).nonzero():
                             d = ti[i[j]]  # detected target
-                            pred_for_d = pred[pi[j],-1]
+                            pred_for_d = pred[pi[j],-2]
+                            pred_for_y = pred[pi[j],-1]
+                            dist_for_d = -1
+                            yaw_for_d = INVALID_YAW
                             if i[j] < len(tdist):
                                 dist_for_d = tdist[i[j]]
-                            else:
-                                dist_for_d = -1
+                            if i[j] < len(tyaw):
+                                yaw_for_d = tyaw[i[j]]    
+                            
                             if d not in detected:
                                 detected.append(d)
                                 if dist_for_d > 0:
                                     dist_count += 1
-                                    RMSE += (pred_for_d-dist_for_d)**2
+                                    d_RMSE += (pred_for_d-dist_for_d)**2
+                                if yaw_for_d != INVALID_YAW:
+                                    yaw_count += 1
+                                    y_RMSE += (pred_for_y-yaw_for_d)**2
                                 correct[pi[j]] = ious[j] > iouv  # iou_thres is 1xn
                                 if len(detected) == nl:  # all targets already located in image
                                     break
             # Append statistics (correct, conf, pcls, tcls)
             stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
     if dist_count > 0:
-        RMSE = torch.sqrt(MAX_DIST*RMSE/dist_count)
+        d_RMSE = torch.sqrt(MAX_DIST*d_RMSE/dist_count)
+    if dist_count > 0:
+        y_RMSE = torch.sqrt((PI/2)*y_RMSE/yaw_count)
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
     if len(stats):
@@ -205,13 +215,13 @@ def test(cfg,
         nt = torch.zeros(1)
 
     # Print results
-    pf = '%20s' + '%10.3g' * 7  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map, mf1, RMSE))
+    pf = '%20s' + '%10.3g' * 8  # print format
+    print(pf % ('all', seen, nt.sum(), mp, mr, map, mf1, d_RMSE, y_RMSE))
 
     # Print results per class
     if verbose and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
-            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i],RMSE))
+            print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i], d_RMSE, y_RMSE))
 
     # Print speeds
     if verbose:
@@ -246,7 +256,7 @@ def test(cfg,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    return (mp, mr, map, mf1, *(loss.cpu() / len(dataloader)).tolist(),RMSE), maps
+    return (mp, mr, map, mf1, *(loss.cpu() / len(dataloader)).tolist(), d_RMSE, y_RMSE), maps
 
 
 if __name__ == '__main__':

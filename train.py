@@ -208,7 +208,7 @@ def train():
     prebias = start_epoch == 0
     maps = np.zeros(nc)  # mAP per class
     # torch.autograd.set_detect_anomaly(True)
-    results = (0, 0, 0, 0, 0, 0, 0, 0)  # 'P', 'R', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification'
+    results = (0, 0, 0, 0, 0, 0, 0, 0, 0)  # 'P', 'R', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification'
     t0 = time.time()
     print('Using %g dataloader workers' % nw)
     print('Starting training for %g epochs...' % epochs)
@@ -236,8 +236,8 @@ def train():
             image_weights = labels_to_image_weights(dataset.labels, nc=nc, class_weights=w)
             dataset.indices = random.choices(range(dataset.n), weights=image_weights, k=dataset.n)  # rand weighted idx
 
-        mloss = torch.zeros(5).to(device)  # mean losses
-        print(('\n' + '%10s' * 9) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'RMSE', 'targets', 'img_size'))
+        mloss = torch.zeros(6).to(device)  # mean losses
+        print(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'Dist_RMSE', 'Yaw_RMSE', 'total', 'targets', 'img_size'))
         pbar = tqdm(enumerate(dataloader), total=nb)  # progress bar
         for i, _batch in pbar:  # batch -------------------------------------------------------------
             if (opt.seg or opt.depth):
@@ -312,7 +312,7 @@ def train():
             # Print batch results
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
             mem = '%.3gG' % (torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0)  # (GB)
-            s = ('%10s' * 2 + '%10.3g' * 7) % ('%g/%g' % (epoch, epochs - 1), mem, *mloss, len(targets), img_size)
+            s = ('%10s' * 2 + '%10.3g' * 8) % ('%g/%g' % (epoch, epochs - 1), mem, *mloss, len(targets), img_size)
             pbar.set_description(s)
 
             # end batch ------------------------------------------------------------------------------------------------
@@ -338,15 +338,15 @@ def train():
 
             # Write epoch results
             with open(results_file, 'a') as f:
-                f.write(s + '%10.3g' * 9 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
+                f.write(s + '%10.3g' * 11 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
         if len(opt.name) and opt.bucket:
             os.system('gsutil cp results.txt gs://%s/results/results%s.txt' % (opt.bucket, opt.name))
 
         # Write Tensorboard results
         if tb_writer:
             x = list(mloss) + list(results)
-            titles = ['GIoU', 'Objectness', 'Classification', 'RMSE', 'Train loss',
-                      'Precision', 'Recall', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification', 'val RMSE']
+            titles = ['GIoU', 'Objectness', 'Classification', 'Dist RMSE', 'Yaw RMSE', 'Train loss',
+                      'Precision', 'Recall', 'mAP', 'F1', 'val GIoU', 'val Objectness', 'val Classification', 'val Dist RMSE', 'val Yaw RMSE']
             for xi, title in zip(x, titles):
                 tb_writer.add_scalar(title, xi, epoch)
 

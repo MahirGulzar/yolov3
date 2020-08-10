@@ -13,9 +13,11 @@ import torch
 import torch.nn as nn
 import torchvision
 from tqdm import tqdm
+from math import pi as PI
 
 from . import torch_utils  # , google_utils
-MAX_DIST = 36.22
+MAX_DIST = 35.906630053868454
+INVALID_YAW = -100
 matplotlib.rc('font', **{'size': 11})
 
 # Set printoptions
@@ -25,6 +27,16 @@ np.set_printoptions(linewidth=320, formatter={'float_kind': '{:11.5g}'.format}) 
 # Prevent OpenCV from multithreading (to use PyTorch DataLoader)
 cv2.setNumThreads(0)
 
+def angle_in_limit(angle):
+    # To limit the angle in -pi/2 - pi/2
+    limit_degree = 5
+    while(angle >= PI/2):
+        angle -= PI
+    while(angle < -PI/2):
+        angle += PI
+    if(abs(angle + PI / 2) < limit_degree / 180 * PI):
+        angle = PI / 2
+    return angle
 
 def init_seeds(seed=0):
     random.seed(seed)
@@ -379,8 +391,8 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
     if target_seg is not None or target_depth is not None:
         p, pred_seg, pred_depth = p
     ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj, ldist = ft([0]), ft([0]), ft([0]), ft([0])
-    tcls, tbox, tdist, indices, anchor_vec = build_targets(model, targets)
+    lcls, lbox, lobj, ldist, lyaw = ft([0]), ft([0]), ft([0]), ft([0]), ft([0])
+    tcls, tbox, tdist, tyaw, indices, anchor_vec = build_targets(model, targets)
     h = model.hyp  # hyperparameters
     red = 'mean'  # Loss reduction (sum or mean)
 
@@ -418,15 +430,21 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
             tobj[b, a, gj, gi] = (1.0 - model.gr) + model.gr * giou.detach().clamp(0).type(tobj.dtype)  # giou ratio
 
             if model.nc > 1:  # cls loss (only if multiple classes)
-                t = torch.full_like(ps[:, 5:-1], cn)  # targets
+                t = torch.full_like(ps[:, 5:-2], cn)  # targets
                 t[range(nb), tcls[i]] = cp
-                lcls += BCEcls(ps[:, 5:-1], t)  # BCE
+                lcls += BCEcls(ps[:, 5:-2], t)  # BCE
                 # lcls += CE(ps[:, 5:], tcls[i])  # CE
-                pred_dist = torch.sigmoid(ps[..., -1])
+                pred_dist = torch.sigmoid(ps[..., -2])
                 tdist_i = tdist[i]
                 dist_mask = (tdist_i > 0).view(-1)
                 if len(dist_mask) > 0: 
-                    ldist += torch.sqrt(MAX_DIST*MSE(pred_dist[dist_mask], tdist_i[dist_mask]))*0.2
+                    ldist += torch.sqrt(MAX_DIST*MSE(pred_dist[dist_mask], tdist_i[dist_mask]))*0.4
+
+                pred_yaw = torch.tanh(ps[..., -1])
+                tyaw_i = tyaw[i]
+                yaw_mask = (tyaw_i != INVALID_YAW).view(-1)
+                if len(yaw_mask) > 0: 
+                    lyaw += torch.sqrt((PI/2)*MSE(pred_yaw[yaw_mask], tyaw_i[yaw_mask]))*0.4
 
             # Append targets to text file
             # with open('targets.txt', 'a') as file:
@@ -453,14 +471,18 @@ def compute_loss(p, targets, model, target_seg=None, target_depth=None):  # pred
         loss += ldist
     else:
         ldist = ft([0])
-    return loss, torch.cat((lbox, lobj, lcls, ldist, loss)).detach()
+    if not torch.isnan(lyaw):
+        loss += lyaw
+    else:
+        lyaw = ft([0])
+    return loss, torch.cat((lbox, lobj, lcls, ldist, lyaw, loss)).detach()
 
 
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
 
     nt = len(targets)
-    tcls, tbox, tdist, indices, av = [], [], [], [], []
+    tcls, tbox, tdist, tyaw, indices, av = [], [], [], [], [], []
     multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
     reject, use_all_anchors = True, True
     for i in model.yolo_layers:
@@ -472,7 +494,7 @@ def build_targets(model, targets):
 
         # iou of targets-anchors
         t, a = targets, []
-        gwh = t[:, 4:-1] * ng
+        gwh = t[:, 4:-2] * ng
         if nt:
             iou = wh_iou(anchor_vec, gwh)
 
@@ -506,8 +528,9 @@ def build_targets(model, targets):
             assert c.max() < model.nc, 'Model accepts %g classes labeled from 0-%g, however you labelled a class %g. ' \
                                        'See https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data' % (
                                            model.nc, model.nc - 1, c.max())
-        tdist.append(t[:, -1])
-    return tcls, tbox, tdist, indices, av
+        tdist.append(t[:, -2])
+        tyaw.append(t[:, -1])
+    return tcls, tbox, tdist, tyaw, indices, av
 
 
 def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=True, classes=None, agnostic=False):
@@ -524,7 +547,7 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
 
     method = 'vision_batch'
     batched = 'batch' in method  # run once per image, all classes simultaneously
-    nc = prediction[0].shape[1] - 6  # number of classes
+    nc = prediction[0].shape[1] - 7  # number of classes
     multi_label &= nc > 1  # multiple labels per box
     output = [None] * len(prediction)
     for image_i, pred in enumerate(prediction):
@@ -539,18 +562,18 @@ def non_max_suppression(prediction, conf_thres=0.1, iou_thres=0.6, multi_label=T
             continue
 
         # Compute conf
-        pred[..., 5:-1] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
+        pred[..., 5:-2] *= pred[..., 4:5]  # conf = obj_conf * cls_conf
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         box = xywh2xyxy(pred[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_label:
-            i, j = (pred[:, 5:-1] > conf_thres).nonzero().t()
-            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
+            i, j = (pred[:, 5:-2] > conf_thres).nonzero().t()
+            pred = torch.cat((box[i], pred[i, j + 5].unsqueeze(1), j.float().unsqueeze(1), pred[i,-2].unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
         else:  # best class only
-            conf, j = pred[:, 5:-1].max(1)
-            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
+            conf, j = pred[:, 5:-2].max(1)
+            pred = torch.cat((box, conf.unsqueeze(1), j.float().unsqueeze(1), pred[i,-2].unsqueeze(1), pred[i,-1].unsqueeze(1)), 1)
 
         # Filter by class
         if classes:

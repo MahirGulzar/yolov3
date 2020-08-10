@@ -180,7 +180,7 @@ class YOLOLayer(nn.Module):
         self.nl = len(layers)  # number of output layers (3)
         self.na = len(anchors)  # number of anchors (3)
         self.nc = nc  # number of classes (80)
-        self.no = nc + 6  # number of outputs
+        self.no = nc + 7  # number of outputs
         self.nx = 0  # initialize number of x gridpoints
         self.ny = 0  # initialize number of y gridpoints
 
@@ -243,7 +243,8 @@ class YOLOLayer(nn.Module):
             io[..., :2] = torch.sigmoid(io[..., :2]) + self.grid_xy  # xy
             io[..., 2:4] = torch.exp(io[..., 2:4]) * self.anchor_wh  # wh yolo method
             io[..., :4] *= self.stride
-            torch.sigmoid_(io[..., 4:])
+            torch.sigmoid_(io[..., 4:-1])
+            torch.tanh_(io[..., -1])
             return io.view(bs, -1, self.no), p  # view [1, 3, 13, 13, 85] as [1, 507, 85]
 
 

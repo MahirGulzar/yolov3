@@ -14,7 +14,7 @@ from PIL import Image, ExifTags
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from utils.utils import xyxy2xywh, xywh2xyxy
+from utils.utils import xyxy2xywh, xywh2xyxy, INVALID_YAW, angle_in_limit, PI
 
 help_url = 'https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data'
 img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.dng']
@@ -323,7 +323,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.imgs = [None] * n
         self.labels = [None] * n
         if cache_labels or image_weights:  # cache labels for faster training
-            self.labels = [np.zeros((0, 6))] * n
+            self.labels = [np.zeros((0, 7))] * n
             extract_bounding_boxes = False
             create_datasubset = False
             pbar = tqdm(self.label_files, desc='Caching labels')
@@ -337,9 +337,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     continue
 
                 if l.shape[0]:
-                    assert l.shape[1] == 6, '> 5 label columns: %s' % file
-                    assert (l[:,:-1] >= 0).all(), 'negative labels: %s' % file
-                    assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
+                    assert l.shape[1] == 7, '> 7 label columns: %s' % file
+                    assert (l[:,:-2] >= 0).all(), 'negative labels: %s' % file
+                    assert (l[:, 1:-1] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
                     if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
                         nd += 1  # print('WARNING: duplicate rows in %s' % self.label_files[i])  # duplicate rows
                     if single_cls:
@@ -467,6 +467,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 3] = ratio[0] * w * (x[:, 1] + x[:, 3] / 2) + pad[0]
                     labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + pad[1]
                     labels[:, 5] = x[:, 5]
+                    labels[:, 6] = x[:, 6]
+                    for i in range(len(labels)):
+                        if labels[i,6] != INVALID_YAW:
+                            labels[i,6] = angle_in_limit(labels[i,6]) / (PI/2)
+
 
         if self.augment:
             # Augment imagespace
@@ -522,7 +527,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if nL:
                     labels[:, 2] = 1 - labels[:, 2]
 
-        labels_out = torch.zeros((nL, 7))
+        labels_out = torch.zeros((nL, 8))
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
 
