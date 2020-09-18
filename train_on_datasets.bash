@@ -12,7 +12,12 @@ python validate_and_configure.py $CHKPT_DIR --train_data_path ${TRAIN_DATA_PATH}
 # Yolov3.conv.81 required for finetuning 
 if [[ ! -f yolov3.conv.81 ]]
   then
+   {
     wget ${args[0]}
+   } ||
+   {
+    cp ${args[0]} yolov3.conv.81
+   }
   fi
 
 # Start training
